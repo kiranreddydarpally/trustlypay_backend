@@ -3,6 +3,9 @@ import { Knex } from 'src/knex/knex.interface';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { tableNames } from 'src/common/enums/table-names.enum';
+import { IUser } from './interfaces/user.interface';
+import { CreateUserDto } from './dto/create-user.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -19,9 +22,31 @@ export class UsersService {
       userId: 123,
     });
 
-    const users = await this._knex.table(tableNames.users);
+    return [];
+  }
 
-    console.log(users);
-    return users;
+  async createUser(dto: CreateUserDto): Promise<IUser> {
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const user = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.testingUserTable)
+      .insert({
+        email: dto.email,
+        password: hashedPassword,
+      })
+      .returning('*')
+      .then((result) => result[0]);
+
+    return user;
+  }
+
+  async findByEmail(email: string): Promise<IUser | undefined> {
+    const findUser = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.testingUserTable)
+      .where({ email: email })
+      .first();
+    this.logger.log(findUser);
+    return findUser;
   }
 }

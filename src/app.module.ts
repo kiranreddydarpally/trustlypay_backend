@@ -8,6 +8,7 @@ import { KnexModule } from './knex/knex.module';
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './winston-logger.config';
 import { PayinModule } from './payin/payin.module';
+import { TasksModule } from './cornjob/tasks.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PayinModule } from './payin/payin.module';
     UsersModule,
     WinstonModule.forRoot(winstonConfig),
     PayinModule,
+    TasksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

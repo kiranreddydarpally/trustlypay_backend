@@ -1,30 +1,34 @@
 import { utilities as nestWinstonModuleUtilities } from 'nest-winston';
 import * as winston from 'winston';
+import 'winston-daily-rotate-file';
+import * as moment from 'moment';
+
+const transport = new winston.transports.DailyRotateFile({
+  filename: 'logs/application-%DATE%.log',
+  datePattern: 'YYYY-MM-DD',
+  zippedArchive: true,
+  maxSize: '20m',
+  maxFiles: '14d',
+});
+
+const customFormat = winston.format.printf(({ level, message }) => {
+  return `${moment().format('YYYY-MM-DD HH:mm:ss')} [${level.toUpperCase()}]: ${message}  `;
+});
 
 export const winstonConfig: winston.LoggerOptions = {
+  format: winston.format.combine(
+    winston.format.timestamp({ format: () => new Date().toISOString() }), // ISO UTC timestamp
+    customFormat,
+  ),
   transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-        nestWinstonModuleUtilities.format.nestLike('NestApp', {
-          prettyPrint: true,
-        }),
-      ),
-    }),
+    new winston.transports.Console(),
     new winston.transports.File({
       filename: 'logs/error.log',
       level: 'error',
-      format: winston.format.combine(
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // 👈 Add timestamp
-        winston.format.json(),
-      ),
     }),
     new winston.transports.File({
       filename: 'logs/combined.log',
-      format: winston.format.combine(
-        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // 👈 Add timestamp
-        winston.format.json(),
-      ),
     }),
+    transport,
   ],
 };
