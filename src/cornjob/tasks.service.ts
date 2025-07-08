@@ -8,7 +8,7 @@ export class TasksService {
 
   constructor(private schedulerRegistry: SchedulerRegistry) {}
 
-  @Cron(CronExpression.EVERY_10_SECONDS, {
+  @Cron(CronExpression.EVERY_12_HOURS, {
     name: 'pendingcheck',
     timeZone: 'Asia/Kolkata',
   })

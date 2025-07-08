@@ -1,7 +1,7 @@
 import { utilities as nestWinstonModuleUtilities } from 'nest-winston';
 import * as winston from 'winston';
 import 'winston-daily-rotate-file';
-import * as moment from 'moment';
+import dayjs from 'dayjs';
 
 const transport = new winston.transports.DailyRotateFile({
   filename: 'logs/application-%DATE%.log',
@@ -12,7 +12,7 @@ const transport = new winston.transports.DailyRotateFile({
 });
 
 const customFormat = winston.format.printf(({ level, message }) => {
-  return `${moment().format('YYYY-MM-DD HH:mm:ss')} [${level.toUpperCase()}]: ${message}  `;
+  return `${dayjs().format('YYYY-MM-DD HH:mm:ss')} [${level.toUpperCase()}]: ${message}  `;
 });
 
 export const winstonConfig: winston.LoggerOptions = {
