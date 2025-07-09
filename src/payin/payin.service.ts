@@ -10,20 +10,29 @@ import { IDecodeResponse } from './interfaces/decode-response.interface';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
+import { IVendorbank } from 'src/interfaces/vendorbank.interface';
 dayjs.extend(utc);
 dayjs.extend(timezone);
+import { HttpService } from '@nestjs/axios';
+import {
+  firstValueFrom,
+  retryWhen,
+  scan,
+  delay,
+  throwError,
+  catchError,
+} from 'rxjs';
 
 @Injectable()
 export class PayinService {
-  private readonly algorithm = 'aes-256-cbc';
-  private readonly salt = 'y7u7i8i9o0y7y6y7'; // 16+ chars
-  private readonly ivLength = 16;
-  private readonly request_key = 'MySecretPassword';
+  private cachedToken = '';
+  private expiryEpoch = 0;
 
   constructor(
     @Inject(KNEX_CONNECTION) private readonly _knex: Knex,
     @Inject(WINSTON_MODULE_NEST_PROVIDER)
     private readonly logger: LoggerService,
+    private readonly httpService: HttpService,
   ) {}
 
   async payIn(payinDto: PayinDto, req: Request, res: Response): Promise<any> {
@@ -66,11 +75,10 @@ export class PayinService {
       created_merchant: number;
     } = await this._knex
       .withSchema(process.env.DB_SCHEMA || 'public')
-
       .table(tableNames.live_merchantapi)
-
       .where({ api_key: payinDto.clientId })
       .first();
+
     if (!merchant) {
       return res.json({
         statusCode: '303',
@@ -79,23 +87,20 @@ export class PayinService {
         clientId: payinDto.clientId,
       });
     }
-
     const createdMerchant = merchant.created_merchant;
     const requestSaltKey = merchant.request_salt_key;
     const encryptionRequestKey = merchant.encryption_request_key;
     const requestHashKey = merchant.request_hashkey;
     const apiSecret = merchant.api_secret;
-    let mainRes: IDecodeResponse;
+    let decryptedData: IDecodeResponse;
+
     try {
-      mainRes = JSON.parse(
+      decryptedData = JSON.parse(
         await this.decryptData(
           payinDto.encryptedData,
           encryptionRequestKey,
           requestSaltKey,
-        ).then((res) => {
-          console.log('res', res);
-          return res;
-        }),
+        ),
       );
     } catch (Exception) {
       return res.json({
@@ -105,17 +110,18 @@ export class PayinService {
         clientId: payinDto.clientId,
       });
     }
+    this.logger.log('decryptedData', decryptedData);
 
-    const clientId = mainRes.clientId;
-    const txnCurr = mainRes.txnCurr;
-    const amount = Number(mainRes.amount);
-    const emailId = mainRes.emailId;
-    const signature = mainRes.signature;
-    const mobileNumber = mainRes.mobileNumber;
-    const clientSecret = mainRes.clientSecret;
-    const username = mainRes.username;
-    const udf1 = mainRes.udf1;
-    const udf2 = mainRes.udf2;
+    const clientId = decryptedData.clientId;
+    const txnCurr = decryptedData.txnCurr;
+    const amount = Number(decryptedData.amount);
+    const emailId = decryptedData.emailId;
+    const signature = decryptedData.signature;
+    const mobileNumber = decryptedData.mobileNumber;
+    const clientSecret = decryptedData.clientSecret;
+    const username = decryptedData.username;
+    const udf1 = decryptedData.udf1;
+    const udf2 = decryptedData.udf2;
     let encodeSignature = '';
 
     encodeSignature = crypto
@@ -132,21 +138,12 @@ export class PayinService {
       .digest('hex');
 
     if (encodeSignature === signature) {
-      const orderResponce = await this._knex
-        .withSchema(process.env.DB_SCHEMA || 'public')
-        .table(tableNames.live_order)
-        .where({
-          order_gid: null,
-        })
-        .first();
-
-      const merchantServ = await this._knex
+      const merchantTable = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
         .table(tableNames.merchant)
         .where({ id: createdMerchant })
         .first();
-      console.log('orderResponce', orderResponce);
-      console.log('merchantServ', merchantServ);
+      console.log('merchantTable', merchantTable);
 
       // if (merchantServ.getTransaction_limit() < amount) {
       //   return res.json({
@@ -159,23 +156,16 @@ export class PayinService {
       //  if(cr.getOrder_gid()==null) {
       //=============== create order ==========================
 
-      const tid = 'OID' + this.getAlphaNumericString(15);
-
-      const liveOrder = {
-        order_gid: tid,
+      const liveOrderObject = {
         order_amount: amount,
         order_status: 'Created',
         created_date: dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss'),
         created_merchant: createdMerchant,
       };
-      const result = await this._knex
-        .withSchema(process.env.DB_SCHEMA || 'public')
-        .table(tableNames.live_order)
-        .insert(liveOrder)
-        .returning('*')
-        .then((result) => result[0]);
-      this.logger.log(`ecrypted Data: ${JSON.stringify(result)}`);
-      const lp = {
+      const liveOrder = await this.generatedOrderGId(liveOrderObject);
+
+      this.logger.log('liveOrder created' + JSON.stringify(liveOrder));
+      const livePaymentObject = {
         transaction_amount: amount,
         transaction_username: username,
         transaction_email: emailId,
@@ -183,18 +173,122 @@ export class PayinService {
         created_merchant: createdMerchant,
         transaction_status: 'pending',
         created_date: dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss'),
-        order_id: result.id,
+        order_id: liveOrder.id,
         udf1: udf1,
         udf2: udf2,
         vendor_id: 0,
-        // rupayapay_tax: '0.00',
-        // goods_service_tax: '0.00',
-        // payment_amount: '0.00',
       };
-      const li = this.saveLivePayment(lp);
-      console.log('li', await li);
+      const livePayment = await this.saveLivePayment(livePaymentObject);
+      this.logger.log(
+        'Created live Transaction Id ' + livePayment.transaction_gid,
+      );
+      const merchantvendorbank = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.merchant_vendor_bank)
+        .where({ merchant_id: createdMerchant })
+        .first();
+      this.logger.log('merchantvendorbank' + merchantvendorbank);
 
-      return;
+      const vendorbank: IVendorbank = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.vendor_bank)
+        .where({ id: merchantvendorbank.upi })
+        .first();
+      this.logger.log('vendorbank ', vendorbank);
+
+      if (vendorbank.id > 0 && vendorbank.bank_name === 'Apexio') {
+        const APEX_API_URL = 'https://api.apexio.co.in/transaction/initiate';
+        // 1. Prepare timestamp in ISO8601
+        const apxTimestamp = dayjs()
+          .tz('Asia/Kolkata')
+          .format('YYYY-MM-DDTHH:mm:ssZ');
+
+        // 2. Prepare necessary values
+        let truncated = Math.trunc(amount * 10) / 10;
+        const amountStr = truncated.toFixed(1);
+        const merchantReferenceId = livePayment.transaction_gid;
+        const service = 'upi';
+        const merchantSecret = '1EDCD414A0B778933AA836E2BB8DD61E'; // replace with actual secret
+
+        // 3. Create HMAC_SHA256 Signature: amount|service|merchant_reference_id
+
+        const signatureData =
+          amountStr + '|' + service + '|' + merchantReferenceId;
+        const hmac = crypto
+          .createHmac('sha256', merchantSecret)
+          .update(signatureData);
+
+        const apxSignature = hmac.digest('base64');
+
+        this.logger.log('apx-signature', apxSignature);
+        // 4. Set headers
+        const token = await this.generateTokenIFNotExist();
+
+        const headers = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'apx-timestamp': apxTimestamp,
+          'apx-signature': apxSignature,
+        };
+
+        // 5. Build request body
+        const body = {
+          merchant_reference_id: merchantReferenceId,
+          amount: amount,
+          currency: 'INR',
+          service: service,
+          service_details: { upi: { channel: 'UPI_INTENT' } },
+          customer_details: {
+            customer_name: livePayment.transaction_username,
+            customer_email: livePayment.transaction_email,
+            customer_mobile: livePayment.transaction_contact,
+          },
+          device_details: {
+            device_name: 'Android',
+            device_id: 'DEVICE1234',
+            device_ip: '192.111.1.1',
+          },
+          geo_location: {
+            latitude: '20.1111',
+            longitude: '20.1111',
+          },
+          webhook_url:
+            'https://www.trustlypay.com/api/gateway/v1/apex/payin/response',
+        };
+
+        // 6. Send Request
+        const maxRetries = 3;
+        const delayMs = 2000;
+        const response = await firstValueFrom(
+          this.httpService.post(APEX_API_URL, body, { headers }).pipe(
+            retryWhen((errors) =>
+              errors.pipe(
+                scan((retryCount, error) => {
+                  const status = error?.response?.status;
+
+                  this.logger.error(
+                    `APEX call failed [${status}] - Attempt ${retryCount + 1}: ${error.message}`,
+                  );
+
+                  if (retryCount + 1 >= maxRetries || status !== 502) {
+                    throw error;
+                  }
+                  return retryCount + 1;
+                }, 0),
+                delay(delayMs),
+              ),
+            ),
+            catchError((err) => {
+              this.logger.error(`Final error after retries: ${err.message}`);
+              return throwError(() => err);
+            }),
+          ),
+        );
+        this.logger.log('APEX Response: ' + response.data);
+      }
+      return res.status(200).json({
+        response: 'send',
+      });
     }
     // } else {
     //   return res.json({
@@ -204,6 +298,72 @@ export class PayinService {
     //     clientId: payinDto.encryptedData,
     //   });
   }
+
+  async generateTokenIFNotExist(): Promise<string> {
+    const nowEpoch = dayjs().unix();
+    this.logger.log(
+      'Checking APEX token validity nowEpoch is' +
+        nowEpoch +
+        'expiryEpoch is' +
+        this.expiryEpoch,
+    );
+    console.log('1', this.cachedToken);
+    console.log('2', nowEpoch);
+    console.log('3', this.expiryEpoch);
+    if (!this.cachedToken || nowEpoch >= this.expiryEpoch) {
+      this.logger.log('Token expired or missing, fetching new token');
+      await this.fetchNewToken();
+    } else {
+      this.logger.log('Reusing valid APEX token.');
+    }
+    console.log('this.cachedToken', this.cachedToken);
+    return this.cachedToken;
+  }
+
+  async fetchNewToken() {
+    try {
+      const loginUrl = 'https://api.apexio.co.in/auth/merchant/login';
+
+      const requestBody = {
+        username: 'AX0047',
+        password: 'TrustPay@',
+      };
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+
+      const response = await firstValueFrom(
+        this.httpService.post(loginUrl, requestBody, { headers }),
+      );
+      const responseData = response.data.data;
+      if (response.status === 200 && responseData) {
+        const payload = responseData.token.split('.')[1];
+
+        const base64UrlDecode = (str) => {
+          const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+          const decoded = atob(base64);
+          return decodeURIComponent(
+            [...decoded]
+              .map((c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+              .join(''),
+          );
+        };
+        const decodedPayload = JSON.parse(base64UrlDecode(payload));
+        this.cachedToken = responseData.token;
+
+        this.expiryEpoch = decodedPayload.exp;
+
+        this.logger.log(
+          'New APEX token fetched. Expires at' + this.expiryEpoch,
+        );
+      } else {
+        this.logger.error('APEX login failed: HTTP {}', responseData);
+      }
+    } catch (error) {
+      this.logger.error('Error while fetching APEX token: {}', error);
+    }
+  }
+
   async getAlphaNumericString(length) {
     const AlphaNumericString =
       '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
@@ -219,8 +379,35 @@ export class PayinService {
     return sb.toString();
   }
 
-  async saveLivePayment(lp): Promise<any> {
-    const tid = 'TP' + this.getAlphaNumericString(15);
+  async generatedOrderGId(liveOrderObject): Promise<any> {
+    const tid = 'OID' + (await this.getAlphaNumericString(15));
+
+    const query = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_order)
+      .where({
+        order_gid: tid,
+      })
+      .first();
+
+    if (!query) {
+      liveOrderObject.order_gid = tid;
+
+      const result = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_order)
+        .insert(liveOrderObject)
+        .returning('*')
+        .then((result) => result[0]);
+
+      return result;
+    } else {
+      await this.generatedOrderGId(liveOrderObject);
+    }
+  }
+
+  async saveLivePayment(livePaymentObject): Promise<any> {
+    const tid = 'TP' + (await this.getAlphaNumericString(15));
     const query = await this._knex
       .withSchema(process.env.DB_SCHEMA || 'public')
       .table(tableNames.live_payment)
@@ -228,21 +415,20 @@ export class PayinService {
       .first();
 
     if (!query) {
-      lp.transaction_gid = tid;
-      lp.created_date = dayjs()
+      livePaymentObject.transaction_gid = tid;
+      livePaymentObject.created_date = dayjs()
         .tz('Asia/Kolkata')
         .format('YYYY-MM-DD HH:mm:ss');
-      lp.adjustment_done = 'N';
-
+      livePaymentObject.adjustment_done = 'N';
       const result = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
         .table(tableNames.live_payment)
-        .insert(lp)
+        .insert(livePaymentObject)
         .returning('*')
         .then((result) => result[0]);
       return result;
     } else {
-      this.saveLivePayment(lp);
+      await this.saveLivePayment(livePaymentObject);
     }
   }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Post, Req, Res, Get } from '@nestjs/common';
 import { PayinService } from './payin.service';
 import { PayinDto } from './dto/payin.dto';
 import { Request as ExpressRequest, Response } from 'express';
@@ -13,5 +13,10 @@ export class PayinController {
     @Res() res: Response,
   ) {
     return this.payinService.payIn(payinDto, req, res);
+  }
+
+  @Get('generate-token')
+  generateTokenIFNotExist(): Promise<string> {
+    return this.payinService.generateTokenIFNotExist();
   }
 }

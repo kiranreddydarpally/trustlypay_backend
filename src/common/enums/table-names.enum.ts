@@ -5,4 +5,6 @@ export enum tableNames {
   live_order = 'live_order',
   merchant = 'merchant',
   live_payment = 'live_payment',
+  merchant_vendor_bank = 'merchant_vendor_bank',
+  vendor_bank = 'vendor_bank',
 }
