@@ -1,4 +1,9 @@
-import { Inject, Injectable, LoggerService } from '@nestjs/common';
+import {
+  HttpException,
+  Inject,
+  Injectable,
+  LoggerService,
+} from '@nestjs/common';
 import { Knex } from 'src/knex/knex.interface';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
@@ -22,6 +27,7 @@ import {
   throwError,
   catchError,
 } from 'rxjs';
+import { IApexResponse } from 'src/interfaces/apex-response.interface';
 
 @Injectable()
 export class PayinService {
@@ -36,31 +42,34 @@ export class PayinService {
   ) {}
 
   async payIn(payinDto: PayinDto, req: Request, res: Response): Promise<any> {
-    this.logger.log(payinDto, '===Post Request From Merchant {}');
-    this.logger.log(req.socket.localPort, 'socket.localPort');
-    this.logger.log(req.protocol, 'protocol');
-    this.logger.log(req.hostname + 'hostname');
+    this.logger.log('Post Request From Merchant ' + JSON.stringify(payinDto));
+    let errorResponse = {};
 
     if (!payinDto.clientId || payinDto.clientId === '') {
-      return res.json({
+      errorResponse = {
         statusCode: '301',
         status: 'Failed',
-        Description: 'Client ID is Required.',
+        Description: 'clientId is Required.',
         clientId: payinDto.clientId,
         encryptedData: payinDto.encryptedData,
-      });
+      };
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      return res.json(errorResponse);
     }
 
     if (!payinDto.encryptedData || payinDto.encryptedData === '') {
-      return res.json({
+      errorResponse = {
         statusCode: '302',
         status: 'Failed',
         Description: 'encryptedData is Required.',
         clientId: payinDto.clientId,
         encryptedData: payinDto.encryptedData,
-      });
+      };
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      return res.json(errorResponse);
     }
-    const merchant: {
+
+    const liveMerchantapi: {
       id: number;
       api_key: string;
       api_secret: string;
@@ -79,7 +88,7 @@ export class PayinService {
       .where({ api_key: payinDto.clientId })
       .first();
 
-    if (!merchant) {
+    if (!liveMerchantapi) {
       return res.json({
         statusCode: '303',
         status: 'Failed',
@@ -87,19 +96,19 @@ export class PayinService {
         clientId: payinDto.clientId,
       });
     }
-    const createdMerchant = merchant.created_merchant;
-    const requestSaltKey = merchant.request_salt_key;
-    const encryptionRequestKey = merchant.encryption_request_key;
-    const requestHashKey = merchant.request_hashkey;
-    const apiSecret = merchant.api_secret;
+    const createdMerchant = liveMerchantapi.created_merchant;
+    const responseSaltKey = liveMerchantapi.response_salt_key;
+    const responseAESKey = liveMerchantapi.encryption_response_key;
+    const requestHashKey = liveMerchantapi.request_hashkey;
+    const apiSecret = liveMerchantapi.api_secret;
     let decryptedData: IDecodeResponse;
 
     try {
       decryptedData = JSON.parse(
         await this.decryptData(
           payinDto.encryptedData,
-          encryptionRequestKey,
-          requestSaltKey,
+          liveMerchantapi.encryption_request_key,
+          liveMerchantapi.request_salt_key,
         ),
       );
     } catch (Exception) {
@@ -128,7 +137,7 @@ export class PayinService {
       .createHmac('sha256', requestHashKey)
       .update(
         clientId +
-          clientSecret +
+          apiSecret +
           txnCurr +
           amount +
           emailId +
@@ -136,7 +145,7 @@ export class PayinService {
           username,
       )
       .digest('hex');
-
+    let liveJsonSD = {};
     if (encodeSignature === signature) {
       const merchantTable = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
@@ -194,109 +203,196 @@ export class PayinService {
         .table(tableNames.vendor_bank)
         .where({ id: merchantvendorbank.upi })
         .first();
-      this.logger.log('vendorbank ', vendorbank);
-
+      this.logger.log('vendorbank ' + JSON.stringify(vendorbank));
+      let intetntString = '';
+      let vtransactionId = '';
       if (vendorbank.id > 0 && vendorbank.bank_name === 'Apexio') {
         const APEX_API_URL = 'https://api.apexio.co.in/transaction/initiate';
-        // 1. Prepare timestamp in ISO8601
-        const apxTimestamp = dayjs()
-          .tz('Asia/Kolkata')
-          .format('YYYY-MM-DDTHH:mm:ssZ');
+        try {
+          // 1. Prepare timestamp in ISO8601
+          const apxTimestamp = dayjs().tz('Asia/Kolkata').format();
 
-        // 2. Prepare necessary values
-        let truncated = Math.trunc(amount * 10) / 10;
-        const amountStr = truncated.toFixed(1);
-        const merchantReferenceId = livePayment.transaction_gid;
-        const service = 'upi';
-        const merchantSecret = '1EDCD414A0B778933AA836E2BB8DD61E'; // replace with actual secret
+          // 2. Prepare necessary values
+          let truncated = Math.trunc(amount * 10) / 10;
+          const amountStr = truncated.toFixed(1);
+          const merchantReferenceId = livePayment.transaction_gid;
+          const service = 'upi';
+          const merchantSecret = '1EDCD414A0B778933AA836E2BB8DD61E'; // replace with actual secret
 
-        // 3. Create HMAC_SHA256 Signature: amount|service|merchant_reference_id
+          // 3. Create HMAC_SHA256 Signature: amount|service|merchant_reference_id
 
-        const signatureData =
-          amountStr + '|' + service + '|' + merchantReferenceId;
-        const hmac = crypto
-          .createHmac('sha256', merchantSecret)
-          .update(signatureData);
+          const signatureData =
+            amountStr + '|' + service + '|' + merchantReferenceId;
+          const hmac = crypto
+            .createHmac('sha256', merchantSecret)
+            .update(signatureData);
 
-        const apxSignature = hmac.digest('base64');
+          const apxSignature = hmac.digest('base64');
 
-        this.logger.log('apx-signature', apxSignature);
-        // 4. Set headers
-        const token = await this.generateTokenIFNotExist();
+          this.logger.log('apx-signature' + apxSignature);
+          // 4. Set headers
+          const token = await this.generateTokenIFNotExist();
+          const headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            'apx-timestamp': apxTimestamp,
+            'apx-signature': apxSignature,
+          };
 
-        const headers = {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          'apx-timestamp': apxTimestamp,
-          'apx-signature': apxSignature,
-        };
+          // 5. Build request body
+          const body = {
+            merchant_reference_id: merchantReferenceId,
+            amount: amount,
+            currency: 'INR',
+            service: service,
+            service_details: { upi: { channel: 'UPI_INTENT' } },
+            customer_details: {
+              customer_name: livePayment.transaction_username,
+              customer_email: livePayment.transaction_email,
+              customer_mobile: livePayment.transaction_contact,
+            },
+            device_details: {
+              device_name: 'Android',
+              device_id: 'DEVICE1234',
+              device_ip: '192.111.1.1',
+            },
+            geo_location: {
+              latitude: '20.1111',
+              longitude: '20.1111',
+            },
+            webhook_url:
+              'https://www.trustlypay.com/api/gateway/v1/apex/payin/response',
+          };
 
-        // 5. Build request body
-        const body = {
-          merchant_reference_id: merchantReferenceId,
-          amount: amount,
-          currency: 'INR',
-          service: service,
-          service_details: { upi: { channel: 'UPI_INTENT' } },
-          customer_details: {
-            customer_name: livePayment.transaction_username,
-            customer_email: livePayment.transaction_email,
-            customer_mobile: livePayment.transaction_contact,
-          },
-          device_details: {
-            device_name: 'Android',
-            device_id: 'DEVICE1234',
-            device_ip: '192.111.1.1',
-          },
-          geo_location: {
-            latitude: '20.1111',
-            longitude: '20.1111',
-          },
-          webhook_url:
-            'https://www.trustlypay.com/api/gateway/v1/apex/payin/response',
-        };
+          // 6. Send Request
+          const maxRetries = 3;
+          const delayMs = 2000;
+          const response: IApexResponse = await firstValueFrom(
+            this.httpService.post(APEX_API_URL, body, { headers }).pipe(
+              retryWhen((errors) =>
+                errors.pipe(
+                  scan((retryCount, error) => {
+                    const status = error?.response?.status;
 
-        // 6. Send Request
-        const maxRetries = 3;
-        const delayMs = 2000;
-        const response = await firstValueFrom(
-          this.httpService.post(APEX_API_URL, body, { headers }).pipe(
-            retryWhen((errors) =>
-              errors.pipe(
-                scan((retryCount, error) => {
-                  const status = error?.response?.status;
+                    this.logger.error(
+                      `APEX call failed [${status}] - Attempt ${retryCount + 1}: ${error.message}`,
+                    );
 
-                  this.logger.error(
-                    `APEX call failed [${status}] - Attempt ${retryCount + 1}: ${error.message}`,
-                  );
-
-                  if (retryCount + 1 >= maxRetries || status !== 502) {
-                    throw error;
-                  }
-                  return retryCount + 1;
-                }, 0),
-                delay(delayMs),
+                    if (retryCount + 1 >= maxRetries || status !== 502) {
+                      throw error;
+                    }
+                    return retryCount + 1;
+                  }, 0),
+                  delay(delayMs),
+                ),
               ),
+              catchError((err) => {
+                this.logger.error('Final error after retries ' + err.message);
+                return throwError(() => err);
+              }),
             ),
-            catchError((err) => {
-              this.logger.error(`Final error after retries: ${err.message}`);
-              return throwError(() => err);
-            }),
-          ),
-        );
-        this.logger.log('APEX Response: ' + response.data);
+          );
+          const responseData = response.data;
+          this.logger.log('APEX Response: ' + JSON.stringify(responseData));
+
+          if (
+            'APX_000' === responseData.meta.response_code &&
+            responseData.data
+          ) {
+            vtransactionId = responseData.data?.apx_payment_id ?? '';
+            intetntString = responseData.data?.payload.url ?? '';
+          } else {
+            const error = responseData.errors;
+            if (error) {
+              this.logger.error(
+                'APEX Error: ' + error?.[0].error_code,
+                error?.[0].error_message,
+              );
+            } else {
+              this.logger.error(
+                'Unknown APEX failure. Full response: {}',
+                responseData,
+              );
+            }
+          }
+        } catch (error) {
+          if (error instanceof HttpException) {
+            this.logger.error(
+              'HTTP Error: StatusCode = {}' + error.getStatus(),
+            );
+            this.logger.error('HTTP Error Body: {}' + error.getResponse());
+          }
+          this.logger.error('General Exception in APEX call: ' + error);
+          // return res.json({ ok: 768 });
+          return res.json({
+            statusCode: '303',
+            status: 'Failed',
+            Description: 'Try After Sometime',
+            clientId: payinDto.clientId,
+            encryptedData: payinDto.encryptedData,
+          });
+        }
       }
-      return res.status(200).json({
-        response: 'send',
-      });
+
+      const result = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_payment)
+        .where('transaction_gid', '=', livePayment.transaction_gid)
+        .update({
+          vendor_transaction_id: vtransactionId,
+          transaction_notes: intetntString,
+          vendor_id: vendorbank.id,
+        })
+        .returning('*')
+        .then((result) => result[0]);
+
+      this.logger.log('query' + JSON.stringify(result));
+
+      // Prepare final JSON for encryption
+
+      liveJsonSD = {
+        userName: username,
+        emailId: emailId,
+        mobileNumber: mobileNumber,
+        amount: amount,
+        txnCurr: txnCurr,
+        orderId: liveOrder.order_gid,
+        upiIntent: intetntString,
+        status: 'success',
+        statusCode: '200',
+        description: 'Do Not Modify UPI String',
+        transactionId: livePayment.transaction_gid,
+        signature: signature,
+        udf1: udf1,
+        udf2: udf2,
+      };
+    } else {
+      liveJsonSD = {
+        statusCode: '305',
+        status: 'Failed',
+        Description: 'Signature Mismatch',
+        clientId: payinDto.encryptedData,
+      };
+      res.json(liveJsonSD);
     }
-    // } else {
-    //   return res.json({
-    //     statusCode: '305',
-    //     status: 'Failed',
-    //     Description: 'Signature Mismatch',
-    //     clientId: payinDto.encryptedData,
-    //   });
+    this.logger.log('==Response JSON Data : ' + JSON.stringify(liveJsonSD));
+
+    let liveEnc = '';
+    try {
+      liveEnc = await this.encryptData(
+        JSON.stringify(liveJsonSD),
+        responseSaltKey,
+        responseAESKey,
+      );
+    } catch (error) {
+      this.logger.error('error ' + error);
+    }
+    this.logger.log('EncryptedData ' + liveEnc);
+
+    return res.send({
+      clientId: clientId,
+      encryptedData: liveEnc,
+    });
   }
 
   async generateTokenIFNotExist(): Promise<string> {
@@ -316,7 +412,6 @@ export class PayinService {
     } else {
       this.logger.log('Reusing valid APEX token.');
     }
-    console.log('this.cachedToken', this.cachedToken);
     return this.cachedToken;
   }
 
@@ -411,7 +506,7 @@ export class PayinService {
     const query = await this._knex
       .withSchema(process.env.DB_SCHEMA || 'public')
       .table(tableNames.live_payment)
-      .where({ vendor_transaction_id: tid })
+      .where({ transaction_gid: tid })
       .first();
 
     if (!query) {
@@ -465,5 +560,24 @@ export class PayinService {
     decrypted += decipher.final('utf8');
 
     return decrypted;
+  }
+
+  async encryptData(
+    plainText: string,
+    aesKey: string,
+    salt: string,
+  ): Promise<string> {
+    const saltBytes = Buffer.from(salt, 'utf-8');
+    const ivBuffer = Buffer.from([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ]);
+
+    const key = crypto.pbkdf2Sync(aesKey, saltBytes, 65536, 32, 'sha1');
+
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, ivBuffer);
+
+    let encrypted = cipher.update(plainText, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted;
   }
 }
