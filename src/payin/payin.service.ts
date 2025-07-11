@@ -7,7 +7,6 @@ import {
 import { Knex } from 'src/knex/knex.interface';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
-import { tableNames } from 'src/common/enums/table-names.enum';
 import { PayinDto } from './dto/payin.dto';
 import * as crypto from 'crypto';
 import { Request, Response } from 'express';
@@ -28,6 +27,12 @@ import {
   catchError,
 } from 'rxjs';
 import { IApexResponse } from 'src/interfaces/apex-response.interface';
+import { ILiveMerchantApi } from 'src/interfaces/live-merchantapi.interface';
+import { ILiveOrder } from 'src/interfaces/live-order.interface';
+import { tableNames } from 'src/enums/table-names.enum';
+import { IlivePayment } from 'src/interfaces/live-payment.interface';
+import { IMerchantVendorBank } from 'src/interfaces/merchant-vendor-bank.interface';
+import { PayinWebHookDto } from './dto/payin-webhook.dto';
 
 @Injectable()
 export class PayinService {
@@ -69,32 +74,23 @@ export class PayinService {
       return res.json(errorResponse);
     }
 
-    const liveMerchantapi: {
-      id: number;
-      api_key: string;
-      api_secret: string;
-      api_expiry: Date;
-      request_hashkey: string;
-      request_salt_key: string;
-      response_salt_key: string;
-      encryption_request_key: string;
-      encryption_response_key: string;
-      response_hashkey: string;
-      created_date: Date;
-      created_merchant: number;
-    } = await this._knex
+    //Check live_merchantapi table and get data
+    const liveMerchantapi: ILiveMerchantApi = await this._knex
       .withSchema(process.env.DB_SCHEMA || 'public')
       .table(tableNames.live_merchantapi)
       .where({ api_key: payinDto.clientId })
       .first();
 
     if (!liveMerchantapi) {
-      return res.json({
+      errorResponse = {
         statusCode: '303',
         status: 'Failed',
         Description: 'Invalid Client Id',
         clientId: payinDto.clientId,
-      });
+        encryptedData: payinDto.encryptedData,
+      };
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      return res.json(errorResponse);
     }
     const createdMerchant = liveMerchantapi.created_merchant;
     const responseSaltKey = liveMerchantapi.response_salt_key;
@@ -112,14 +108,17 @@ export class PayinService {
         ),
       );
     } catch (Exception) {
-      return res.json({
-        statusCode: '304',
+      errorResponse = {
+        statusCode: '305',
         status: 'Failed',
         Description: 'Invalid Encrypted Data',
         clientId: payinDto.clientId,
-      });
+        encryptedData: payinDto.encryptedData,
+      };
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      return res.json(errorResponse);
     }
-    this.logger.log('decryptedData', decryptedData);
+    this.logger.log('decryptedData ', decryptedData);
 
     const clientId = decryptedData.clientId;
     const txnCurr = decryptedData.txnCurr;
@@ -127,7 +126,6 @@ export class PayinService {
     const emailId = decryptedData.emailId;
     const signature = decryptedData.signature;
     const mobileNumber = decryptedData.mobileNumber;
-    const clientSecret = decryptedData.clientSecret;
     const username = decryptedData.username;
     const udf1 = decryptedData.udf1;
     const udf2 = decryptedData.udf2;
@@ -145,35 +143,19 @@ export class PayinService {
           username,
       )
       .digest('hex');
-    let liveJsonSD = {};
+
+    let finalJsonForEncrypt = {};
+
     if (encodeSignature === signature) {
-      const merchantTable = await this._knex
-        .withSchema(process.env.DB_SCHEMA || 'public')
-        .table(tableNames.merchant)
-        .where({ id: createdMerchant })
-        .first();
-      console.log('merchantTable', merchantTable);
-
-      // if (merchantServ.getTransaction_limit() < amount) {
-      //   return res.json({
-      //     statusCode: '313',
-      //     status: 'Failed',
-      //     Description: 'Amount Value is Excess Than Ticket Limit.',
-      //     clientId: payinDto.clientId,
-      //   });
-      // }
-      //  if(cr.getOrder_gid()==null) {
-      //=============== create order ==========================
-
       const liveOrderObject = {
         order_amount: amount,
         order_status: 'Created',
         created_date: dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss'),
         created_merchant: createdMerchant,
       };
-      const liveOrder = await this.generatedOrderGId(liveOrderObject);
+      const liveOrder = await this.saveliveOrder(liveOrderObject);
 
-      this.logger.log('liveOrder created' + JSON.stringify(liveOrder));
+      this.logger.log('liveOrder created ' + JSON.stringify(liveOrder));
       const livePaymentObject = {
         transaction_amount: amount,
         transaction_username: username,
@@ -191,21 +173,39 @@ export class PayinService {
       this.logger.log(
         'Created live Transaction Id ' + livePayment.transaction_gid,
       );
-      const merchantvendorbank = await this._knex
+      const merchantVendorBank: IMerchantVendorBank = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
         .table(tableNames.merchant_vendor_bank)
         .where({ merchant_id: createdMerchant })
         .first();
-      this.logger.log('merchantvendorbank' + merchantvendorbank);
+      this.logger.log(
+        'merchantVendorBank ' + JSON.stringify(merchantVendorBank),
+      );
 
       const vendorbank: IVendorbank = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
         .table(tableNames.vendor_bank)
-        .where({ id: merchantvendorbank.upi })
+        .where({ id: merchantVendorBank.upi })
         .first();
+
       this.logger.log('vendorbank ' + JSON.stringify(vendorbank));
+
       let intetntString = '';
       let vtransactionId = '';
+
+      // update vendorid
+      const vendorBankIdUpdated: IlivePayment = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_payment)
+        .where('transaction_gid', '=', livePayment.transaction_gid)
+        .update({
+          vendor_id: vendorbank.id,
+        })
+        .returning('*')
+        .then((result) => result[0]);
+
+      this.logger.log('query' + JSON.stringify(vendorBankIdUpdated));
+
       if (vendorbank.id > 0 && vendorbank.bank_name === 'Apexio') {
         const APEX_API_URL = 'https://api.apexio.co.in/transaction/initiate';
         try {
@@ -220,7 +220,6 @@ export class PayinService {
           const merchantSecret = '1EDCD414A0B778933AA836E2BB8DD61E'; // replace with actual secret
 
           // 3. Create HMAC_SHA256 Signature: amount|service|merchant_reference_id
-
           const signatureData =
             amountStr + '|' + service + '|' + merchantReferenceId;
           const hmac = crypto
@@ -230,6 +229,7 @@ export class PayinService {
           const apxSignature = hmac.digest('base64');
 
           this.logger.log('apx-signature' + apxSignature);
+
           // 4. Set headers
           const token = await this.generateTokenIFNotExist();
           const headers = {
@@ -275,7 +275,7 @@ export class PayinService {
                     const status = error?.response?.status;
 
                     this.logger.error(
-                      `APEX call failed [${status}] - Attempt ${retryCount + 1}: ${error.message}`,
+                      `APEX call failed [${status}] - Attempt ${retryCount + 1} : ${error.message}`,
                     );
 
                     if (retryCount + 1 >= maxRetries || status !== 502) {
@@ -293,7 +293,7 @@ export class PayinService {
             ),
           );
           const responseData = response.data;
-          this.logger.log('APEX Response: ' + JSON.stringify(responseData));
+          this.logger.log('APEX Response ' + JSON.stringify(responseData));
 
           if (
             'APX_000' === responseData.meta.response_code &&
@@ -302,55 +302,64 @@ export class PayinService {
             vtransactionId = responseData.data?.apx_payment_id ?? '';
             intetntString = responseData.data?.payload.url ?? '';
           } else {
-            const error = responseData.errors;
-            if (error) {
-              this.logger.error(
-                'APEX Error: ' + error?.[0].error_code,
-                error?.[0].error_message,
-              );
-            } else {
-              this.logger.error(
-                'Unknown APEX failure. Full response: {}',
-                responseData,
-              );
-            }
+            this.logger.error('APEX Response: ' + JSON.stringify(responseData));
+
+            return res.json({
+              statusCode: '304',
+              status: 'Failed',
+              Description:
+                'Apologies for the inconvenience. Kindly inform me at the earliest possible moment',
+              clientId: payinDto.clientId,
+              encryptedData: payinDto.encryptedData,
+            });
           }
         } catch (error) {
           if (error instanceof HttpException) {
             this.logger.error(
-              'HTTP Error: StatusCode = {}' + error.getStatus(),
+              'HttpException Exception of APEX StatusCode is ' +
+                error.getStatus(),
             );
-            this.logger.error('HTTP Error Body: {}' + error.getResponse());
+            this.logger.error(
+              'HttpException Exception of APEX response is ' +
+                error.getResponse(),
+            );
+            return res.json({
+              statusCode: '304',
+              status: 'Failed',
+              Description:
+                'Apologies for the inconvenience. Kindly inform me at the earliest possible moment',
+              clientId: payinDto.clientId,
+              encryptedData: payinDto.encryptedData,
+            });
+          } else {
+            this.logger.error('General Exception of APEX ' + error);
+            return res.json({
+              statusCode: '304',
+              status: 'Failed',
+              Description:
+                'Apologies for the inconvenience. Kindly inform me at the earliest possible moment',
+              clientId: payinDto.clientId,
+              encryptedData: payinDto.encryptedData,
+            });
           }
-          this.logger.error('General Exception in APEX call: ' + error);
-          // return res.json({ ok: 768 });
-          return res.json({
-            statusCode: '303',
-            status: 'Failed',
-            Description: 'Try After Sometime',
-            clientId: payinDto.clientId,
-            encryptedData: payinDto.encryptedData,
-          });
         }
       }
 
-      const result = await this._knex
+      const livePaymentUpdate: IlivePayment = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
         .table(tableNames.live_payment)
         .where('transaction_gid', '=', livePayment.transaction_gid)
         .update({
           vendor_transaction_id: vtransactionId,
           transaction_notes: intetntString,
-          vendor_id: vendorbank.id,
         })
         .returning('*')
         .then((result) => result[0]);
 
-      this.logger.log('query' + JSON.stringify(result));
+      this.logger.log('livePaymentUpdate ' + JSON.stringify(livePaymentUpdate));
 
       // Prepare final JSON for encryption
-
-      liveJsonSD = {
+      finalJsonForEncrypt = {
         userName: username,
         emailId: emailId,
         mobileNumber: mobileNumber,
@@ -367,31 +376,35 @@ export class PayinService {
         udf2: udf2,
       };
     } else {
-      liveJsonSD = {
+      errorResponse = {
         statusCode: '305',
         status: 'Failed',
         Description: 'Signature Mismatch',
-        clientId: payinDto.encryptedData,
+        clientId: payinDto.clientId,
+        encryptedData: payinDto.encryptedData,
       };
-      res.json(liveJsonSD);
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      return res.json(errorResponse);
     }
-    this.logger.log('==Response JSON Data : ' + JSON.stringify(liveJsonSD));
+    this.logger.log(
+      'Response JSON Data ' + JSON.stringify(finalJsonForEncrypt),
+    );
 
-    let liveEnc = '';
+    let finalEncryptedData = '';
     try {
-      liveEnc = await this.encryptData(
-        JSON.stringify(liveJsonSD),
+      finalEncryptedData = await this.encryptData(
+        JSON.stringify(finalJsonForEncrypt),
         responseSaltKey,
         responseAESKey,
       );
     } catch (error) {
       this.logger.error('error ' + error);
     }
-    this.logger.log('EncryptedData ' + liveEnc);
+    this.logger.log('final EncryptedData ' + finalEncryptedData);
 
     return res.send({
       clientId: clientId,
-      encryptedData: liveEnc,
+      encryptedData: finalEncryptedData,
     });
   }
 
@@ -459,7 +472,7 @@ export class PayinService {
     }
   }
 
-  async getAlphaNumericString(length) {
+  async getAlphaNumericString(length: number) {
     const AlphaNumericString =
       '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
 
@@ -474,10 +487,10 @@ export class PayinService {
     return sb.toString();
   }
 
-  async generatedOrderGId(liveOrderObject): Promise<any> {
+  async saveliveOrder(liveOrderObject): Promise<ILiveOrder> {
     const tid = 'OID' + (await this.getAlphaNumericString(15));
 
-    const query = await this._knex
+    const query: ILiveOrder = await this._knex
       .withSchema(process.env.DB_SCHEMA || 'public')
       .table(tableNames.live_order)
       .where({
@@ -488,7 +501,7 @@ export class PayinService {
     if (!query) {
       liveOrderObject.order_gid = tid;
 
-      const result = await this._knex
+      const result: ILiveOrder = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
         .table(tableNames.live_order)
         .insert(liveOrderObject)
@@ -497,13 +510,13 @@ export class PayinService {
 
       return result;
     } else {
-      await this.generatedOrderGId(liveOrderObject);
+      return await this.saveliveOrder(liveOrderObject);
     }
   }
 
-  async saveLivePayment(livePaymentObject): Promise<any> {
+  async saveLivePayment(livePaymentObject): Promise<IlivePayment> {
     const tid = 'TP' + (await this.getAlphaNumericString(15));
-    const query = await this._knex
+    const query: IlivePayment = await this._knex
       .withSchema(process.env.DB_SCHEMA || 'public')
       .table(tableNames.live_payment)
       .where({ transaction_gid: tid })
@@ -523,7 +536,7 @@ export class PayinService {
         .then((result) => result[0]);
       return result;
     } else {
-      await this.saveLivePayment(livePaymentObject);
+      return await this.saveLivePayment(livePaymentObject);
     }
   }
 
@@ -535,16 +548,12 @@ export class PayinService {
     const encryptedBuffer = Buffer.from(encryptedHex, 'hex');
     const saltBuffer = Buffer.from(salt, 'utf-8');
 
-    // Use the fixed IV from Java
     const ivBuffer = Buffer.from([
       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     ]);
-    // this.logger.log(encryptedBuffer, 'encryptedBuffer');
-    // this.logger.log(saltBuffer, 'saltBuffer');
-    // this.logger.log(ivBuffer, 'ivBuffer');
+
     // Derive key using PBKDF2 with HMAC-SHA1, 65536 iterations, 256-bit key
     const derivedKey = crypto.pbkdf2Sync(aesKey, saltBuffer, 65536, 32, 'sha1');
-    // this.logger.log(derivedKey, 'derivedKey');
 
     // Create AES decipher
     const decipher = crypto.createDecipheriv(
@@ -552,11 +561,9 @@ export class PayinService {
       derivedKey,
       ivBuffer,
     );
-    // this.logger.log(decipher, 'decipher');
 
     let decrypted = decipher.update(encryptedBuffer, undefined, 'utf8');
 
-    // this.logger.log(decrypted, 'decrypted');
     decrypted += decipher.final('utf8');
 
     return decrypted;
@@ -579,5 +586,9 @@ export class PayinService {
     let encrypted = cipher.update(plainText, 'utf8', 'hex');
     encrypted += cipher.final('hex');
     return encrypted;
+  }
+
+  async payinWebhook(payinWeebHookDto: PayinWebHookDto): Promise<any> {
+    console.log('payinWeebHookDto', payinWeebHookDto);
   }
 }

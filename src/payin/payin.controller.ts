@@ -2,6 +2,7 @@ import { Body, Controller, Post, Req, Res, Get } from '@nestjs/common';
 import { PayinService } from './payin.service';
 import { PayinDto } from './dto/payin.dto';
 import { Request as ExpressRequest, Response } from 'express';
+import { PayinWebHookDto } from './dto/payin-webhook.dto';
 
 @Controller('payin')
 export class PayinController {
@@ -13,6 +14,11 @@ export class PayinController {
     @Res() res: Response,
   ) {
     return this.payinService.payIn(payinDto, req, res);
+  }
+
+  @Post('payin-webhook')
+  payinWebhook(@Body() payinWeebHookDto: PayinWebHookDto): Promise<void> {
+    return this.payinService.payinWebhook(payinWeebHookDto);
   }
 
   @Get('generate-token')

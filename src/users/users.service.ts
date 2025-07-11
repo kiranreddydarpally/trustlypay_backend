@@ -2,10 +2,10 @@ import { Inject, Injectable, LoggerService } from '@nestjs/common';
 import { Knex } from 'src/knex/knex.interface';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
-import { tableNames } from 'src/common/enums/table-names.enum';
 import { IUser } from './interfaces/user.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
+import { tableNames } from 'src/enums/table-names.enum';
 
 @Injectable()
 export class UsersService {

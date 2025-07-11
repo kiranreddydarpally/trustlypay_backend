@@ -1,0 +1,35 @@
+// live_payment
+export interface IlivePayment {
+  id: number;
+  transaction_gid: string;
+  vendor_transaction_id: string;
+  vendor_id: number;
+  bank_ref_no: string;
+  order_id: number;
+  transaction_response: string;
+  transaction_method_id: string;
+  transaction_type: string;
+  transaction_username: string;
+  transaction_email: string;
+  transaction_contact: string;
+  transaction_amount: number;
+  transaction_status: string;
+  transaction_mode: string;
+  transaction_notes: string;
+  transaction_description: string;
+  rupayapay_tax: number;
+  goods_service_tax: number;
+  android_status: string;
+  adjustment_done: string;
+  transaction_date: Date;
+  transaction_ip: string;
+  created_date: Date;
+  created_merchant: number;
+  created_employee: number;
+  udf1: string;
+  udf2: string;
+  udf3: string;
+  udf4: string;
+  udf5: string;
+  payment_amount: number;
+}
