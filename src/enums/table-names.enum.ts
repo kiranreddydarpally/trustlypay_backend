@@ -7,4 +7,5 @@ export enum tableNames {
   live_payment = 'live_payment',
   merchant_vendor_bank = 'merchant_vendor_bank',
   vendor_bank = 'vendor_bank',
+  live_webhook = 'live_webhook',
 }

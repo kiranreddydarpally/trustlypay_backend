@@ -1,0 +1,29 @@
+// live_webhook
+export interface ILiveWebhook {
+  id: number;
+  webhook_url: string;
+  is_active: string;
+  secret_key: string;
+  payment_failed: string;
+  payment_captured: string;
+  transfer_processed: string;
+  refund_processed: string;
+  refund_created: string;
+  refund_speed_changed: string;
+  order_paid: string;
+  dispute_created: string;
+  dispute_won: string;
+  dispute_lost: string;
+  dispute_closed: string;
+  settlement_processed: string;
+  invoice_paid: string;
+  invoice_partially_paid: string;
+  invoice_expired: string;
+  paylink_paid: string;
+  paylink_partially_paid: string;
+  paylink_expired: string;
+  paylink_cancelled: string;
+  created_date: Date;
+  created_merchant: number;
+  newwebhook: number;
+}
