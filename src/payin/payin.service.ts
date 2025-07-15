@@ -233,7 +233,7 @@ export class PayinService {
           this.logger.log('apx-signature' + apxSignature);
 
           // 4. Set headers
-          const token = await this.generateTokenIFNotExist();
+          const token = await this.generateTokenIfNotExist();
           const headers = {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
@@ -410,7 +410,7 @@ export class PayinService {
     });
   }
 
-  async generateTokenIFNotExist(): Promise<string> {
+  async generateTokenIfNotExist(): Promise<string> {
     const nowEpoch = dayjs().unix();
     this.logger.log(
       'Checking APEX token validity nowEpoch is' +
@@ -822,5 +822,179 @@ export class PayinService {
           JSON.stringify(payinWebHookDto),
       );
     }
+  }
+
+  async buildErrorResponse(
+    statusCode: string,
+    description: string,
+    clientId: string,
+    encryptedData: string,
+  ) {
+    return {
+      statusCode: statusCode,
+      status: 'Failed',
+      description: description,
+      clientId: clientId,
+      encryptedData: encryptedData,
+    };
+  }
+
+  async buildFieldMissingResponse(fieldName: string) {
+    return {
+      statusCode: '307',
+      status: 'Failed',
+      DEscription: fieldName + ' is Empty.',
+    };
+  }
+
+  async StatusCheck(payinDto: PayinDto): Promise<any> {
+    this.logger.log(
+      '========== StatusCheck Incoming Request Body ==========' +
+        JSON.stringify(payinDto),
+    );
+    const apiKey = payinDto.clientId;
+    const encryptedData = payinDto.encryptedData;
+
+    if (!apiKey) {
+      return await this.buildErrorResponse(
+        '301',
+        'Client ID is Required.',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    if (!encryptedData) {
+      return await this.buildErrorResponse(
+        '302',
+        'encryptedData is Required.',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    const liveMerchantapi: ILiveMerchantApi = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_merchantapi)
+      .where({ api_key: payinDto.clientId })
+      .first();
+
+    if (!liveMerchantapi) {
+      return this.buildErrorResponse(
+        '303',
+        'Invalid Client Id',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    let decryptedData: {
+      clientId: string;
+      clientSecret: string;
+      amount: string;
+      udf1: string;
+      transactionId: string;
+    };
+
+    try {
+      decryptedData = JSON.parse(
+        await this.decryptData(
+          encryptedData,
+          liveMerchantapi.encryption_request_key,
+          liveMerchantapi.request_salt_key,
+        ),
+      );
+      this.logger.log('decryptedData ' + JSON.stringify(decryptedData));
+    } catch (error) {
+      return await this.buildErrorResponse(
+        '304',
+        'Invalid Encrypted Data',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    const amount = decryptedData.amount;
+    const clientId = decryptedData.clientId;
+    const clientKey = decryptedData.clientSecret;
+    const udf1 = decryptedData.udf1;
+    const transactionId = decryptedData.transactionId;
+
+    if (!amount) {
+      return await this.buildFieldMissingResponse('amount');
+    }
+    if (!clientKey) {
+      return await this.buildFieldMissingResponse('clientKey');
+    }
+    if (!udf1) {
+      return await this.buildFieldMissingResponse('udf1');
+    }
+    if (!transactionId) {
+      return await this.buildFieldMissingResponse('transactionId');
+    }
+
+    let livePayment: IlivePayment = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_payment)
+      .where('transaction_gid', '=', transactionId)
+      .returning('*')
+      .then((result) => result[0]);
+
+    this.logger.log('livePayment ' + JSON.stringify(livePayment));
+
+    let liveJsonSD = {};
+
+    if (!livePayment) {
+      this.logger.warn(
+        'Transaction not found in live_payment. Checking in live_payment_bkp...',
+      );
+      livePayment = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_payment_bkp)
+        .where('transaction_gid', '=', transactionId)
+        .returning('*')
+        .then((result) => result[0]);
+      this.logger.log('live_payment_bkp ' + livePayment);
+    }
+
+    if (!livePayment) {
+      return await this.buildErrorResponse(
+        '305',
+        'Cannot Find Transaction with your transactionId i.e., ' +
+          transactionId,
+        apiKey,
+        encryptedData,
+      );
+    } else {
+      liveJsonSD = {
+        transactionId: livePayment.transaction_gid,
+        bankRefNo: livePayment.bank_ref_no,
+        transactionType: livePayment.transaction_type,
+        userName: livePayment.transaction_username,
+        amount: livePayment.transaction_amount,
+        status: livePayment.transaction_status,
+        udf1: livePayment.udf1,
+      };
+    }
+    this.logger.log('liveJsonSD ' + JSON.stringify(liveJsonSD));
+
+    let encryptedResponse = '';
+    try {
+      encryptedResponse = await this.encryptData(
+        JSON.stringify(liveJsonSD),
+        liveMerchantapi.encryption_response_key,
+        liveMerchantapi.response_salt_key,
+      );
+      this.logger.log('Final Encrypted Response ' + encryptedResponse);
+    } catch (error) {
+      this.logger.error('Error while encrypting response data ' + error);
+    }
+    const jsonObject = { clientId: clientId, encryptedData: encryptedResponse };
+
+    this.logger.log(
+      'Final Response Payload Sent to Client: ' + JSON.stringify(jsonObject),
+    );
+
+    return jsonObject;
   }
 }
