@@ -17,7 +17,7 @@ export class PayinController {
     return this.payinService.payIn(payinDto, req, res);
   }
 
-  @Post('payin-webhook')
+  @Post('gateway/v1/apex/payin/response')
   payinWebhook(@Body() payinWeebHookDto: PayinWebHookDto): Promise<void> {
     return this.payinService.payinWebhook(payinWeebHookDto);
   }

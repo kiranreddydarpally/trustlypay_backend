@@ -3,6 +3,8 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './winston-logger.config';
+import { ValidationPipe } from '@nestjs/common';
+import { ValidationExceptionFilter } from './filters/validation-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -16,7 +18,14 @@ async function bootstrap() {
     .setVersion('0.0.1')
     // .addBearerAuth()
     .build();
-
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+  app.useGlobalFilters(new ValidationExceptionFilter());
   const document = SwaggerModule.createDocument(app, config);
 
   SwaggerModule.setup('api/docs', app, document);

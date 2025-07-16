@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpException,
   Inject,
   Injectable,
@@ -212,7 +213,9 @@ export class PayinService {
         const APEX_API_URL = 'https://api.apexio.co.in/transaction/initiate';
         try {
           // 1. Prepare timestamp in ISO8601
-          const apxTimestamp = dayjs().tz('Asia/Kolkata').format();
+          const apxTimestamp = dayjs()
+            .tz('Asia/Kolkata')
+            .format('YYYY-MM-DDTHH:mm:ss.SSSZ');
 
           // 2. Prepare necessary values
           let truncated = Math.trunc(amount * 10) / 10;
@@ -706,8 +709,13 @@ export class PayinService {
         .where('created_merchant', '=', livePayment.created_merchant)
         .returning('*')
         .then((result) => result[0]);
+      if (!liveWebhook) {
+        this.logger.error('--ERROR-- ' + liveWebhook);
+        throw new BadRequestException('webhook not found');
+      }
+      this.logger.log('liveWebhook' + liveWebhook);
       const merchantUrl =
-        liveWebhook.webhook_url ??
+        liveWebhook?.webhook_url ??
         'http://localhost:3000/api/payin/webhook-trigger';
 
       let liveOrderUpdate: ILiveOrder = await this._knex

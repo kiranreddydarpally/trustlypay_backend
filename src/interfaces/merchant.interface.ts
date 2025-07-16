@@ -32,12 +32,12 @@ export interface IMerchant {
   is_account_locked: YNEnum;
 }
 
-const enum YNEnum {
+enum YNEnum {
   Y = 'Y',
   N = 'N',
 }
 
-const enum ActiveInactiveEnum {
+enum ActiveInactiveEnum {
   active = 'active',
   inactive = 'inactive',
 }

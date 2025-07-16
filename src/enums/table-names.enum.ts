@@ -9,4 +9,8 @@ export enum tableNames {
   vendor_bank = 'vendor_bank',
   live_webhook = 'live_webhook',
   live_payment_bkp = 'live_payment_bkp',
+  merchant_payout_ipwhitelist = 'merchant_payout_ipwhitelist',
+  merchant_payout_vendor = 'merchant_payout_vendor',
+  merchant_payout_charges = 'merchant_payout_charges',
+  payout_balance = 'payout_balance',
 }

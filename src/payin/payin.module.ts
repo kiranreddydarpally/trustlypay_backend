@@ -7,5 +7,6 @@ import { HttpModule } from '@nestjs/axios';
   providers: [PayinService],
   controllers: [PayinController],
   imports: [HttpModule],
+  exports: [PayinService],
 })
 export class PayinModule {}
