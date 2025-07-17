@@ -13,4 +13,6 @@ export enum tableNames {
   merchant_payout_vendor = 'merchant_payout_vendor',
   merchant_payout_charges = 'merchant_payout_charges',
   payout_balance = 'payout_balance',
+  payout_balance_transaction = 'payout_balance_transaction',
+  payout_transactions = 'payout_transactions',
 }

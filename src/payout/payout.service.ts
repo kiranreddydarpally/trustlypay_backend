@@ -45,6 +45,7 @@ export class PayoutService {
   async directPayoutTransfer(payoutDto: PayoutDto, req: Request) {
     this.logger.log('----- PAYOUT TRANSFER -----');
     this.logger.log('Request IP Address ' + req.ip);
+    this.logger.log('Request IP Address ' + req.headers['x-forwarded-for']);
     this.logger.log('Request clientId ' + payoutDto.clientId);
     this.logger.log('Request encrypt data ' + payoutDto.encrypt);
 
@@ -79,6 +80,7 @@ export class PayoutService {
     // TODO check ip address
     const key = liveMerchantapi.api_secret;
     let decrypted_string: IPayoutDecodeResponse;
+
     try {
       decrypted_string = JSON.parse(
         JSON.parse(await this.decryptAES128ECB(payoutDto.encrypt, key)),
@@ -191,7 +193,12 @@ export class PayoutService {
             }
           }
           const amount_tax =
-            decrypted_string.amount + total_charge + tax_charges;
+            Number(decrypted_string.amount) + total_charge + tax_charges;
+          this.logger.log('merchant ' + Number(decrypted_string.amount));
+
+          this.logger.log('total_charge ' + total_charge);
+          this.logger.log('tax_charges ' + tax_charges);
+          this.logger.log('amount_tax' + amount_tax);
 
           const body = {
             username: 'AX0047',
@@ -202,9 +209,9 @@ export class PayoutService {
           const headers = {
             'Content-Type': 'application/json',
           };
+          this.logger.log('payout_auth url' + url);
           this.logger.log('payout_auth body ' + JSON.stringify(body));
-          this.logger.log('payout_auth url' + JSON.stringify(body));
-          this.logger.log('payout_auth headers ' + JSON.stringify(body));
+          this.logger.log('payout_auth headers ' + JSON.stringify(headers));
 
           const apexAuthResponse = await firstValueFrom(
             this.httpService.post(url, body, { headers }),
@@ -243,12 +250,20 @@ export class PayoutService {
           const formatted = dayjs()
             .tz('Asia/Kolkata')
             .format('YYYY-MM-DDTHH:mm:ss.SSSZ');
-          const amount = Number(parseFloat(decrypted_string.amount).toFixed(1));
           const service = 'payout';
           const merchantReferenceId = order_id;
           const payeeBankAccountNo = decrypted_string.account_no;
           const secretKey = '1EDCD414A0B778933AA836E2BB8DD61E';
-          const data = `${amount}|${service}|${merchantReferenceId}|${payeeBankAccountNo}`;
+          let truncated = Math.trunc(Number(decrypted_string.amount) * 10) / 10;
+
+          const data =
+            truncated.toFixed(1) +
+            '|' +
+            service +
+            '|' +
+            merchantReferenceId +
+            '|' +
+            payeeBankAccountNo;
           const hmacHash = crypto.createHmac('sha256', secretKey).update(data);
           const apxSignature = hmacHash.digest('base64');
           const authorization = apexAuthResponse['data']['data']['token'];
@@ -267,6 +282,8 @@ export class PayoutService {
               .forUpdate()
               .first();
             this.logger.log('balance ' + JSON.stringify(balance));
+            this.logger.log('amount_tax ' + amount_tax);
+            this.logger.log('balance.balance ' + balance.balance);
 
             if (!balance) {
               await trx.rollback();
@@ -274,20 +291,20 @@ export class PayoutService {
                 '-- ERROR -- Insufficient balance - Please add balance in your Account',
               );
 
-              throw new BadRequestException({
-                message:
-                  'Please add balance in your Account (Insufficient balance)',
-              });
+              throw new BadRequestException(
+                'Please add balance in your Account. Insufficient balance',
+              );
             }
 
-            if (amount_tax > balance.balance) {
+            if (amount_tax > Number(balance.balance)) {
               await trx.rollback();
               this.logger.error(
-                '-- ERROR -- Insufficient balance ' + amount_tax,
+                ' amount_tax should be less than balance.balance. amount_tax is ->' +
+                  amount_tax +
+                  'balance.balance is ->' +
+                  balance.balance,
               );
-              throw new BadRequestException({
-                message: 'Insufficient balance.',
-              });
+              throw new BadRequestException('Insufficient balance.');
             }
 
             const url = 'https://api.apexio.co.in/transaction/initiate';
@@ -298,12 +315,157 @@ export class PayoutService {
               'apx-signature': apxSignature,
               Authorization: `Bearer ${authorization}`,
             };
+            // const response = {
+            //   data: {
+            //     meta: {
+            //       response_code: 'APX_000',
+            //       message: 'SUCCESS',
+            //     },
+            //     data: {
+            //       apx_transaction_id: 'APXXXXX',
+            //       merchant_refereence_id: 'XXXXXXXXXXXXXXXX',
+            //       status: 'success',
+            //       service_charge: 0.21,
+            //       bank_reference_no: 'XXXXXXXXXXXXXXX',
+            //       created_at: null,
+            //       remark: 'SUCCESS',
+            //     },
+            //     errors: null,
+            //   },
+            // };
             const response = await firstValueFrom(
               this.httpService.post(url, payout_payment_details, { headers }),
             );
 
             this.logger.log('response.data ' + JSON.stringify(response.data));
+
+            if (
+              !response.data ||
+              response.data['meta']['message'] === 'FAILED' ||
+              response.data['meta']['response_code'] === 'APX_001'
+            ) {
+              await trx.rollback();
+              this.logger.error(
+                'Payout transfer failed - amount refunded - ' + amount_tax,
+              );
+              throw new BadRequestException(
+                response.data['meta']['message'] ??
+                  'Getting error in payout transfer',
+              );
+            }
+
+            const debitSuccess = await trx
+              .withSchema(process.env.DB_SCHEMA || 'public')
+              .table(tableNames.payout_balance)
+              .where({ merchant_id: liveMerchantapi.created_merchant })
+              .decrement('balance', amount_tax)
+              .returning('*')
+              .then((rows) => rows[0]);
+
+            this.logger.log('debitSuccess ' + JSON.stringify(debitSuccess));
+
+            if (!debitSuccess) {
+              await trx.rollback();
+              this.logger.log('Balance decrement failed');
+              throw new BadRequestException('Failed to debit balance');
+            }
+
+            const updatedBalance: IPayoutBalance = await trx
+              .withSchema(process.env.DB_SCHEMA || 'public')
+              .table(tableNames.payout_balance)
+              .where('merchant_id', liveMerchantapi.created_merchant)
+              .forUpdate()
+              .first();
+            this.logger.log('balance ' + JSON.stringify(updatedBalance));
+
+            let statusDescription;
+            if (response.data['data']['status'] == 'SUCCESS') {
+              statusDescription = 'Transaction Status Success';
+            } else if (response.data['data']['status'] == 'PENDING') {
+              statusDescription = 'Transaction Status Pending';
+            } else if (response.data['data']['status'] == 'FAILED') {
+              statusDescription = 'Transaction Status Failed';
+            } else {
+              statusDescription = 'Transaction Status Pending';
+            }
+            const udf1_data = decrypted_string['udf1'] ?? '';
+            await trx
+              .withSchema(process.env.DB_SCHEMA || 'public')
+              .insert({
+                merchant_id: liveMerchantapi.created_merchant,
+                amount: amount_tax,
+                balance: updatedBalance.balance,
+                type: 'debit',
+                created_date: dayjs()
+                  .tz('Asia/Kolkata')
+                  .format('YYYY-MM-DD HH:mm:ss'),
+              })
+              .into(tableNames.payout_balance_transaction);
+
+            await trx
+              .withSchema(process.env.DB_SCHEMA || 'public')
+              .insert({
+                reference_id: response.data.data.apx_transaction_id,
+                utr: response.data.data.bank_reference_no,
+                merchant_id: liveMerchantapi.created_merchant,
+                transfer_id: order_id,
+                ben_id: '',
+                ben_name: decrypted_string.name,
+                ben_phone: decrypted_string.phone,
+                ben_email: decrypted_string.email,
+                ben_upi: '',
+                ben_card_no: null,
+                ben_ifsc: decrypted_string.ifsc_code,
+                ben_bank_acc: decrypted_string.account_no,
+                amount: decrypted_string.amount,
+                transfer_mode: decrypted_string.transferMode,
+                status: response.data.data.status,
+                remarks: response.data.data.remark,
+                purpose: decrypted_string.purpose,
+                transfer_desc: statusDescription,
+                vendor_desc: response.data.meta.message,
+                vendor_charges: total_charge,
+                goods_service_tax: tax_charges,
+                vendor: merchantPayoutVendor.imps,
+                created_at: new Date()
+                  .toISOString()
+                  .slice(0, 19)
+                  .replace('T', ' '),
+                transfer_type: null,
+                udf1: udf1_data,
+                udf2: '',
+                udf3: '',
+                udf4: '',
+                udf5: '',
+              })
+              .into(tableNames.payout_transactions);
+
+            await trx.commit();
+            const respose_data = {
+              statusCode: 200,
+              date: dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss'),
+              amount: decrypted_string['amount'],
+              orderId: order_id,
+              status: response.data['data']['status'],
+              desc: statusDescription,
+              bankId: response.data['data']['bank_reference_no'],
+            };
+            const key = liveMerchantapi.api_secret;
+            this.logger.log(
+              'JSON.stringify(response.data) ' + JSON.stringify(response.data),
+            );
+            const encrypted_string = await this.encryptAES128ECB(
+              JSON.stringify(response.data),
+              key,
+            );
+            this.logger.log(
+              'Apexio-payout transfer final response ' +
+                JSON.stringify(encrypted_string),
+            );
+
+            return encrypted_string;
           } catch (err) {
+            await trx.rollback();
             throw err;
           }
         } else {

@@ -11,7 +11,7 @@ export class PayoutDto {
 
   @ApiProperty({
     example:
-      '+Y6NJiGPh2V/bXk/0oRBEPKQR+pM5w1RvzkMu1Wreja5y63TCo9CrVkrOUw9l8KWE7nqv+1ELnjHWPPkth7pT2w8N2B6hoSFSptDOUzzXooHKXVC+Ak3nnqptGwfWnpOX5JljnCUtJ3jnNncWf0j0hLaXfvNDRIILhcCOxh0V6qrVznjTbPnDrhH3en26tMe1crAstCp1EH517nxFHqf9cMJRwSSwnwOzJfGkQ2qwcpNnxb/Nj4WdDssSNrs+rqxnm03Bl1OOpZEeafXQ1p1aY8jPLvOE+vFQKKaKB1+wfujg1UYkNjdEaSnkWuYjWjza0ktkTOO0HEMTiVc+jqDU3VVK7fhjRXf6xMLEfwRHGiC1aKpw5/E60ZhKd76F3Yje/6wIxSGH6EzIov3mQg05erl/Vbw/IJSSrOf0dZbBkRTCgejaLXhpXbhS3LUlWW/',
+      '+Y6NJiGPh2V/bXk/0oRBEL7n44hG32pkGbJUN6X0Ey4cXosjSI030CbtiyKgfrPRrUgWZ/Sr4wHxhK5iYV7FPWT7+6ryp67oKeXspJBnt5iymQ2ba8/Eb2TzDmxX8+N+ve83T/b2cufGdTNXrLKW7NTV0hrLCfAUc//fJwa/cAkVtHu8/ErLnf8IaTlhctwm25HpQLEp/kmWTYTaARYuzkJXWt4SrESO/0KmzGnixAIHfq650ZVqbfBWupzfmAjRc2Qbn5W6eGj4x3ORfaeKalmw4aE1UORlysQPTyFmgvY9k2czaJPD0Vnq75ZQC7jHrUgWZ/Sr4wHxhK5iYV7FPW2oUmTIr4OQJUrLCb906KeSJllCWVw0o159rxXNPtMdlU8y0je78ePL/piSTbWcGdc2I8teUj415Xeb9z2lKjbIV79VzqczQKhMhGaBGALa6SQsgZck98KCwQmmrgeoIQ==',
   })
   @IsNotEmpty()
   @IsString()
