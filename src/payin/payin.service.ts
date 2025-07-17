@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpException,
   Inject,
   Injectable,
@@ -14,7 +15,7 @@ import { IDecodeResponse } from './interfaces/decode-response.interface';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import { IVendorbank } from 'src/interfaces/vendorbank.interface';
+import { IVendorbank } from 'src/interfaces/vendor-bank.interface';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 import { HttpService } from '@nestjs/axios';
@@ -33,6 +34,8 @@ import { tableNames } from 'src/enums/table-names.enum';
 import { IlivePayment } from 'src/interfaces/live-payment.interface';
 import { IMerchantVendorBank } from 'src/interfaces/merchant-vendor-bank.interface';
 import { PayinWebHookDto } from './dto/payin-webhook.dto';
+import { WebhookTriggerDto } from './dto/webhook-trigger.dto';
+import { ILiveWebhook } from 'src/interfaces/live-webhook.interface';
 
 @Injectable()
 export class PayinService {
@@ -210,7 +213,9 @@ export class PayinService {
         const APEX_API_URL = 'https://api.apexio.co.in/transaction/initiate';
         try {
           // 1. Prepare timestamp in ISO8601
-          const apxTimestamp = dayjs().tz('Asia/Kolkata').format();
+          const apxTimestamp = dayjs()
+            .tz('Asia/Kolkata')
+            .format('YYYY-MM-DDTHH:mm:ss.SSSZ');
 
           // 2. Prepare necessary values
           let truncated = Math.trunc(amount * 10) / 10;
@@ -231,7 +236,7 @@ export class PayinService {
           this.logger.log('apx-signature' + apxSignature);
 
           // 4. Set headers
-          const token = await this.generateTokenIFNotExist();
+          const token = await this.generateTokenIfNotExist();
           const headers = {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
@@ -408,7 +413,7 @@ export class PayinService {
     });
   }
 
-  async generateTokenIFNotExist(): Promise<string> {
+  async generateTokenIfNotExist(): Promise<string> {
     const nowEpoch = dayjs().unix();
     this.logger.log(
       'Checking APEX token validity nowEpoch is' +
@@ -588,7 +593,416 @@ export class PayinService {
     return encrypted;
   }
 
-  async payinWebhook(payinWeebHookDto: PayinWebHookDto): Promise<any> {
-    console.log('payinWeebHookDto', payinWeebHookDto);
+  async webHookTrigger(webhookTriggerDto: WebhookTriggerDto): Promise<string> {
+    this.logger.log('========== webHookTrigger called ==========');
+    this.logger.log('webhookTriggerDto  ' + JSON.stringify(webhookTriggerDto));
+
+    return 'Hello World! this is kiran';
+  }
+
+  async payinWebhook(payinWebHookDto: PayinWebHookDto): Promise<any> {
+    this.logger.log('========== APEX CALLBACK HIT RECEIVED ==========');
+    this.logger.log('payinWebHookDto' + JSON.stringify(payinWebHookDto));
+    const meta = payinWebHookDto?.meta ?? {};
+    const webHookresponseCode: string = meta?.response_code ?? '';
+    const message: string = meta?.message ?? '';
+
+    const data = payinWebHookDto?.data ?? {};
+    const paymentId = data?.apx_payment_id ?? 0;
+    const clientRefId = data.client_ref_id ?? '';
+    const amount = data.amount ?? 0.0;
+    const currency = data.currency ?? '';
+    const bankId = data.bank_reference ?? '';
+    const status = data.status ?? '';
+    const service = data.service ?? '';
+
+    const createdAt = data.created_at ?? '';
+    const serviceCharge = data.service_charge ?? 0.0;
+    const errors = Array.isArray(payinWebHookDto?.errors)
+      ? payinWebHookDto.errors
+      : [];
+
+    this.logger.log(
+      'payinWeebHookDto?.errors ' + JSON.stringify(payinWebHookDto?.errors),
+    );
+    this.logger.log('errors ' + JSON.stringify(errors));
+
+    if (errors && errors.length > 0) {
+      this.logger.warn(`APEX Errors : ${JSON.stringify(errors)}`);
+    }
+    const serviceDetails = data.service_details ?? {};
+    const upi = serviceDetails.upi ?? {};
+    const channel = upi.channel ?? '';
+
+    // Log or process extracted values
+    this.logger.log('Parsed values - paymentId ' + paymentId);
+    this.logger.log('Parsed values - clientRefId ' + clientRefId);
+    this.logger.log('Parsed values - amount: ' + amount);
+    this.logger.log('Parsed values - status ' + status);
+    this.logger.log('Parsed values - channel ' + channel);
+
+    this.logger.log(
+      'Parsed values - Payment ID: {}, Client Ref: {}, Amount: {}, Status: {}, Channel: {}' +
+        paymentId,
+      clientRefId,
+      amount,
+      status,
+      channel,
+    );
+    this.logger.log(
+      'apex webhook Response TID :  ' +
+        clientRefId +
+        'status ' +
+        status +
+        ' amount ' +
+        amount,
+    );
+
+    const livePayment: IlivePayment = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_payment)
+      .where({ transaction_gid: clientRefId })
+      .first();
+    this.logger.log('livePayment  ' + JSON.stringify(livePayment));
+    const txn_status = status; // comes from "data.status"
+    const status_code = webHookresponseCode; // comes from "meta.response_code"
+    const description = message;
+    this.logger.log('txn_status  ' + txn_status);
+    if (['success', 'failure', 'pending'].includes(txn_status.toLowerCase())) {
+      console.log('ok');
+
+      const liveMerchantapi: ILiveMerchantApi = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_merchantapi)
+        .where({ created_merchant: livePayment.created_merchant })
+        .first();
+      this.logger.log('liveMerchantapi ' + JSON.stringify(liveMerchantapi));
+
+      const statusToSave =
+        txn_status === 'failure' ? 'failed' : txn_status.toLowerCase();
+      const livePaymentObject = {
+        transaction_status: statusToSave,
+        transaction_description: description,
+        bank_ref_no: bankId,
+        transaction_mode: 'UPI',
+        transaction_date: dayjs()
+          .tz('Asia/Kolkata')
+          .format('YYYY-MM-DD HH:mm:ss'),
+        transaction_type: 'UPI',
+      };
+      // update livePay
+      const livePaymentUpdate: IlivePayment = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_payment)
+        .where('transaction_gid', '=', clientRefId)
+        .update(livePaymentObject)
+        .returning('*')
+        .then((result) => result[0]);
+
+      this.logger.log('livePaymentUpdate ' + JSON.stringify(livePaymentUpdate));
+      this.logger.log(
+        'livePaymentUpdate.order_id ' + livePaymentUpdate.order_id,
+      );
+      let liveWebhook: ILiveWebhook = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_webhook)
+        .where('created_merchant', '=', livePayment.created_merchant)
+        .returning('*')
+        .then((result) => result[0]);
+      if (!liveWebhook) {
+        this.logger.error('--ERROR-- ' + liveWebhook);
+        throw new BadRequestException('webhook not found');
+      }
+      this.logger.log('liveWebhook' + liveWebhook);
+      const merchantUrl =
+        liveWebhook?.webhook_url ??
+        'http://localhost:3000/api/payin/webhook-trigger';
+
+      let liveOrderUpdate: ILiveOrder = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_order)
+        .where('id', '=', livePaymentUpdate.order_id)
+        .returning('*')
+        .then((result) => result[0]);
+      this.logger.log('liveOrderUpdated ' + JSON.stringify(liveOrderUpdate));
+
+      if (txn_status.toLowerCase() === 'success') {
+        liveOrderUpdate = await this._knex
+          .withSchema(process.env.DB_SCHEMA || 'public')
+          .table(tableNames.live_order)
+          .where('id', '=', livePaymentUpdate.order_id)
+          .update({ order_status: 'Paid' })
+          .returning('*')
+          .then((result) => result[0]);
+
+        this.logger.log('liveOrderUpdate ' + JSON.stringify(liveOrderUpdate));
+      }
+      this.logger.log('merchantUrl ' + merchantUrl);
+
+      if (merchantUrl) {
+        let signature = '';
+        try {
+          signature = crypto
+            .createHmac('sha256', liveMerchantapi.response_hashkey)
+            .update(
+              status_code +
+                liveOrderUpdate.order_gid +
+                livePaymentUpdate.transaction_gid +
+                String(bankId) +
+                livePaymentUpdate.transaction_description,
+            )
+            .digest('hex');
+
+          this.logger.log('webhook signature ', signature);
+        } catch (error) {
+          this.logger.log('webhook signature values exception ' + error);
+        }
+        const options: any = {
+          status: status_code,
+          clientId: liveMerchantapi.api_key,
+          orderId: liveOrderUpdate.order_gid,
+          transactionId: livePaymentUpdate.transaction_gid,
+          bankId: livePaymentUpdate.bank_ref_no,
+          amount: livePaymentUpdate.transaction_amount,
+          emailId: livePaymentUpdate.transaction_email,
+          mobileNumber: livePaymentUpdate.transaction_contact,
+          date: livePaymentUpdate.transaction_date,
+          signature: signature,
+          txnstatus: livePaymentUpdate.transaction_status,
+          description: livePaymentUpdate.transaction_description,
+          transaction_type: livePaymentUpdate.transaction_type,
+          udf1: livePaymentUpdate.udf1,
+          udf2: livePaymentUpdate.udf2,
+          udf3: livePaymentUpdate.udf3,
+          udf4: livePaymentUpdate.udf4,
+          udf5: livePaymentUpdate.udf5,
+        };
+
+        if (!livePaymentUpdate.transaction_response) {
+          options.transaction_method_id =
+            livePaymentUpdate.transaction_method_id;
+        }
+        this.logger.log(
+          'webhook Data to be pass in web hook ' + JSON.stringify(options),
+        );
+        let secureData = '';
+        try {
+          secureData = await this.encryptData(
+            JSON.stringify(options),
+            liveMerchantapi.response_salt_key,
+            liveMerchantapi.encryption_response_key,
+          );
+        } catch (error) {
+          this.logger.error('Intentpay encrypt webhookRes : ' + error);
+        }
+        this.logger.log('secureData : ' + secureData);
+        let isWebHookSend: boolean = false;
+        try {
+          const headers = {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 5.1) AppleWebKit/535.11 (KHTML, like Gecko) Chrome/17.0.963.56 Safari/535.11',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Content-Type': 'application/json',
+          };
+          const requestBody = {
+            clientId: liveMerchantapi.api_key, // equivalent of liveApi.getApi_key()
+            secureData: secureData,
+          };
+
+          const response = await firstValueFrom(
+            this.httpService.post(merchantUrl, requestBody, { headers }),
+          );
+
+          this.logger.log('clientId ' + liveMerchantapi.api_key);
+          this.logger.log('response status for clientId ' + response.status);
+          this.logger.log('response data for clientId ' + response.data);
+          isWebHookSend = true;
+        } catch (error) {
+          this.logger.log('Error inside Apex webhook : ' + error);
+        }
+        this.logger.log('Apex webhook send: ' + isWebHookSend);
+      } else {
+        this.logger.log('Merchant Url is blank ' + merchantUrl);
+      }
+    } else {
+      this.logger.error(
+        "payment don't have success or failure or pending " +
+          JSON.stringify(payinWebHookDto),
+      );
+    }
+  }
+
+  async buildErrorResponse(
+    statusCode: string,
+    description: string,
+    clientId: string,
+    encryptedData: string,
+  ) {
+    return {
+      statusCode: statusCode,
+      status: 'Failed',
+      description: description,
+      clientId: clientId,
+      encryptedData: encryptedData,
+    };
+  }
+
+  async buildFieldMissingResponse(fieldName: string) {
+    return {
+      statusCode: '307',
+      status: 'Failed',
+      DEscription: fieldName + ' is Empty.',
+    };
+  }
+
+  async StatusCheck(payinDto: PayinDto): Promise<any> {
+    this.logger.log(
+      '========== StatusCheck Incoming Request Body ==========' +
+        JSON.stringify(payinDto),
+    );
+    const apiKey = payinDto.clientId;
+    const encryptedData = payinDto.encryptedData;
+
+    if (!apiKey) {
+      return await this.buildErrorResponse(
+        '301',
+        'Client ID is Required.',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    if (!encryptedData) {
+      return await this.buildErrorResponse(
+        '302',
+        'encryptedData is Required.',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    const liveMerchantapi: ILiveMerchantApi = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_merchantapi)
+      .where({ api_key: payinDto.clientId })
+      .first();
+
+    if (!liveMerchantapi) {
+      return this.buildErrorResponse(
+        '303',
+        'Invalid Client Id',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    let decryptedData: {
+      clientId: string;
+      clientSecret: string;
+      amount: string;
+      udf1: string;
+      transactionId: string;
+    };
+
+    try {
+      decryptedData = JSON.parse(
+        await this.decryptData(
+          encryptedData,
+          liveMerchantapi.encryption_request_key,
+          liveMerchantapi.request_salt_key,
+        ),
+      );
+      this.logger.log('decryptedData ' + JSON.stringify(decryptedData));
+    } catch (error) {
+      return await this.buildErrorResponse(
+        '304',
+        'Invalid Encrypted Data',
+        apiKey,
+        encryptedData,
+      );
+    }
+
+    const amount = decryptedData.amount;
+    const clientId = decryptedData.clientId;
+    const clientKey = decryptedData.clientSecret;
+    const udf1 = decryptedData.udf1;
+    const transactionId = decryptedData.transactionId;
+
+    if (!amount) {
+      return await this.buildFieldMissingResponse('amount');
+    }
+    if (!clientKey) {
+      return await this.buildFieldMissingResponse('clientKey');
+    }
+    if (!udf1) {
+      return await this.buildFieldMissingResponse('udf1');
+    }
+    if (!transactionId) {
+      return await this.buildFieldMissingResponse('transactionId');
+    }
+
+    let livePayment: IlivePayment = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_payment)
+      .where('transaction_gid', '=', transactionId)
+      .returning('*')
+      .then((result) => result[0]);
+
+    this.logger.log('livePayment ' + JSON.stringify(livePayment));
+
+    let liveJsonSD = {};
+
+    if (!livePayment) {
+      this.logger.warn(
+        'Transaction not found in live_payment. Checking in live_payment_bkp...',
+      );
+      livePayment = await this._knex
+        .withSchema(process.env.DB_SCHEMA || 'public')
+        .table(tableNames.live_payment_bkp)
+        .where('transaction_gid', '=', transactionId)
+        .returning('*')
+        .then((result) => result[0]);
+      this.logger.log('live_payment_bkp ' + livePayment);
+    }
+
+    if (!livePayment) {
+      return await this.buildErrorResponse(
+        '305',
+        'Cannot Find Transaction with your transactionId i.e., ' +
+          transactionId,
+        apiKey,
+        encryptedData,
+      );
+    } else {
+      liveJsonSD = {
+        transactionId: livePayment.transaction_gid,
+        bankRefNo: livePayment.bank_ref_no,
+        transactionType: livePayment.transaction_type,
+        userName: livePayment.transaction_username,
+        amount: livePayment.transaction_amount,
+        status: livePayment.transaction_status,
+        udf1: livePayment.udf1,
+      };
+    }
+    this.logger.log('liveJsonSD ' + JSON.stringify(liveJsonSD));
+
+    let encryptedResponse = '';
+    try {
+      encryptedResponse = await this.encryptData(
+        JSON.stringify(liveJsonSD),
+        liveMerchantapi.encryption_response_key,
+        liveMerchantapi.response_salt_key,
+      );
+      this.logger.log('Final Encrypted Response ' + encryptedResponse);
+    } catch (error) {
+      this.logger.error('Error while encrypting response data ' + error);
+    }
+    const jsonObject = { clientId: clientId, encryptedData: encryptedResponse };
+
+    this.logger.log(
+      'Final Response Payload Sent to Client: ' + JSON.stringify(jsonObject),
+    );
+
+    return jsonObject;
   }
 }

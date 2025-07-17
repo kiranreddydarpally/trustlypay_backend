@@ -10,6 +10,7 @@ import { winstonConfig } from './winston-logger.config';
 import { PayinModule } from './payin/payin.module';
 import { TasksModule } from './cornjob/tasks.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { PayoutModule } from './payout/payout.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     PayinModule,
     TasksModule,
     DashboardModule,
+    PayoutModule,
   ],
   controllers: [AppController],
   providers: [AppService],

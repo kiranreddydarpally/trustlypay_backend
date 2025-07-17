@@ -31,6 +31,7 @@ export class UsersService {
       .withSchema(process.env.DB_SCHEMA || 'public')
       .table(tableNames.testingUserTable)
       .insert({
+        username: dto.username,
         email: dto.email,
         password: hashedPassword,
       })

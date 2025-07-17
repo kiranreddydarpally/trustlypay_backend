@@ -1,16 +1,14 @@
 import { IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-export class CreateUserDto {
-  @ApiProperty()
+export class WebhookTriggerDto {
+  @ApiProperty({
+    example: 'TP_live_gC7KkRBRQCdtssWK',
+  })
   @IsString()
-  username: string;
+  clientId: string;
 
   @ApiProperty()
   @IsString()
-  email: string;
-
-  @ApiProperty()
-  @IsString()
-  password: string;
+  secureData: string;
 }
