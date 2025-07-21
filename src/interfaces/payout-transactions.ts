@@ -1,0 +1,33 @@
+// payout_transactions
+export interface IPayoutTransactions {
+  id: number;
+  merchant_id: number;
+  reference_id: string;
+  utr: string;
+  transfer_id: string;
+  ben_id: string;
+  ben_name: string;
+  ben_phone: string;
+  ben_email: string;
+  ben_upi: string;
+  ben_card_no: string;
+  ben_ifsc: string;
+  ben_bank_acc: string;
+  amount: string;
+  transfer_mode: string;
+  vendor: string;
+  status: string;
+  remarks: string;
+  purpose: string;
+  transfer_desc: string;
+  vendor_desc: string;
+  vendor_charges: string;
+  goods_service_tax: string;
+  created_at: Date;
+  transfer_type: string;
+  udf1: string;
+  udf2: string;
+  udf3: string;
+  udf4: string;
+  udf5: string;
+}
