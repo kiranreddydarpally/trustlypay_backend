@@ -3,4 +3,5 @@ export interface IUser {
   email: string;
   password: string;
   createdAt: Date;
+  role: string;
 }

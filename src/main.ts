@@ -16,7 +16,16 @@ async function bootstrap() {
     .setTitle('Trustlypay Swagger')
     .setDescription('Rest API service for trustlypay backend')
     .setVersion('0.0.1')
-    // .addBearerAuth()
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'Authorization',
+        in: 'header',
+      },
+      'access-token',
+    )
     .build();
   app.useGlobalPipes(
     new ValidationPipe({

@@ -47,7 +47,7 @@ export class UsersService {
       .table(tableNames.testingUserTable)
       .where({ email: email })
       .first();
-    this.logger.log(findUser);
+    this.logger.log('findUser ' + JSON.stringify(findUser));
     return findUser;
   }
 }
