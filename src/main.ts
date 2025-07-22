@@ -16,7 +16,16 @@ async function bootstrap() {
     .setTitle('Trustlypay Swagger')
     .setDescription('Rest API service for trustlypay backend')
     .setVersion('0.0.1')
-    // .addBearerAuth()
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'Authorization',
+        in: 'header',
+      },
+      'access-token',
+    )
     .build();
   app.useGlobalPipes(
     new ValidationPipe({
@@ -29,8 +38,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
 
   SwaggerModule.setup('api/docs', app, document);
-
-  await app.listen(process.env.PORT ?? 3000);
-  console.log(`App running on http://localhost:3000/api`);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`App running on http://localhost:${port}/api`);
 }
 bootstrap();
