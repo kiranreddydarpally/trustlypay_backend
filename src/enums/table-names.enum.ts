@@ -15,4 +15,5 @@ export enum tableNames {
   payout_balance = 'payout_balance',
   payout_balance_transaction = 'payout_balance_transaction',
   payout_transactions = 'payout_transactions',
+  payout_balance_refund = 'payout_balance_refund',
 }

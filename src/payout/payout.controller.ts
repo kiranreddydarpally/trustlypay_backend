@@ -38,4 +38,12 @@ export class PayoutController {
       key,
     );
   }
+
+  @Post('balanceCheck')
+  payoutBalanceCheck(
+    @Body() payoutDto: PayoutDto,
+    @Req() req: ExpressRequest,
+  ): Promise<string> {
+    return this.payoutService.payoutBalanceCheck(payoutDto, req);
+  }
 }
