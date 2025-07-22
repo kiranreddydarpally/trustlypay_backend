@@ -26,6 +26,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { IPayoutBalance } from 'src/interfaces/payout-balance.interface';
+import { StatusCheckDetailsDto } from './dto/status-check-details.dto';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
@@ -42,7 +43,10 @@ export class PayoutService {
     private readonly httpService: HttpService,
   ) {}
 
-  async directPayoutTransfer(payoutDto: PayoutDto, req: Request) {
+  async directPayoutTransfer(
+    payoutDto: PayoutDto,
+    req: Request,
+  ): Promise<string> {
     this.logger.log('----- PAYOUT TRANSFER -----');
     this.logger.log('Request IP Address ' + req.ip);
     this.logger.log('Request IP Address ' + req.headers['x-forwarded-for']);
@@ -77,13 +81,22 @@ export class PayoutService {
         ipwhitelist: req.ip,
       })
       .first();
-    // TODO check ip address
-    const key = liveMerchantapi.api_secret;
+
+    // if (!ipAddress) {
+    //   errorResponse = {
+    //     Description: 'Ip Address is not whitelisted',
+    //     clientId: payoutDto.clientId,
+    //     encryptedData: payoutDto.encrypt,
+    //   };
+    //   this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+    //   throw new BadRequestException('Ip Address is not whitelisted');
+    // }
+    const apiSecret = liveMerchantapi.api_secret;
     let decrypted_string: IPayoutDecodeResponse;
 
     try {
       decrypted_string = JSON.parse(
-        JSON.parse(await this.decryptAES128ECB(payoutDto.encrypt, key)),
+        JSON.parse(await this.decryptAES128ECB(payoutDto.encrypt, apiSecret)),
       );
       if (!decrypted_string) {
         throw new BadRequestException('Invalid Encrypted ');
@@ -95,7 +108,7 @@ export class PayoutService {
         encryptedData: payoutDto.encrypt,
       };
       this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
-      throw new BadRequestException(errorResponse);
+      throw new BadRequestException('Invalid Encrypted Data');
     }
     this.logger.log('decryptedData ' + JSON.stringify(decrypted_string));
     const dtoObject = plainToInstance(TransferDetailsDto, decrypted_string);
@@ -106,10 +119,7 @@ export class PayoutService {
         acc[err.property] = Object.values(err.constraints || {});
         return acc;
       }, {});
-      return {
-        statusCode: 400,
-        message: validationErrors,
-      };
+      throw new BadRequestException(...Object.values(validationErrors));
     }
     this.logger.log('dtoObject ' + JSON.stringify(dtoObject));
 
@@ -129,7 +139,7 @@ export class PayoutService {
     }
     const order_id = 'TP' + (await this.payinService.getAlphaNumericString(13));
     this.logger.log('order_id ' + order_id);
-
+    let encryptedString: string = '';
     if (merchantPayoutVendor.imps === '1') {
       const merchantPayoutCharges: IMerchantPayoutCharges = await this._knex
         .withSchema(process.env.DB_SCHEMA || 'public')
@@ -217,10 +227,10 @@ export class PayoutService {
             this.httpService.post(url, body, { headers }),
           );
           this.logger.log(
-            'apexAuthResponse.data ' + JSON.stringify(apexAuthResponse.data),
+            'apexAuthResponse.data ' + JSON.stringify(apexAuthResponse?.data),
           );
 
-          const payout_payment_details = {
+          const payoutPaymentDetails = {
             merchant_reference_id: order_id,
             amount: decrypted_string.amount,
             currency: 'INR',
@@ -266,46 +276,39 @@ export class PayoutService {
             payeeBankAccountNo;
           const hmacHash = crypto.createHmac('sha256', secretKey).update(data);
           const apxSignature = hmacHash.digest('base64');
-          const authorization = apexAuthResponse['data']['data']['token'];
+          const authorization = apexAuthResponse?.['data']?.['data']?.['token'];
           this.logger.log('hmacHash ' + JSON.stringify(apxSignature));
           this.logger.log('authorization ' + JSON.stringify(authorization));
 
           const trx = await this._knex.transaction();
 
           try {
-            const balance: IPayoutBalance = await trx
+            const debitSuccess: IPayoutBalance = await trx
               .withSchema(process.env.DB_SCHEMA || 'public')
               .table(tableNames.payout_balance)
-              .where({
-                merchant_id: liveMerchantapi.created_merchant,
-              })
-              .forUpdate()
-              .first();
-            this.logger.log('balance ' + JSON.stringify(balance));
-            this.logger.log('amount_tax ' + amount_tax);
-            this.logger.log('balance.balance ' + balance.balance);
+              .where({ merchant_id: liveMerchantapi.created_merchant })
+              .andWhere('balance', '>=', amount_tax)
+              .decrement('balance', amount_tax)
+              .returning('*')
+              .then((rows) => rows[0]);
+            this.logger.log('debitSuccess  ' + JSON.stringify(debitSuccess));
+            this.logger.log(
+              'debitSuccess is ' +
+                debitSuccess?.balance +
+                'and amount_tax is ' +
+                amount_tax,
+            );
 
-            if (!balance) {
+            if (!debitSuccess) {
               await trx.rollback();
               this.logger.error(
-                '-- ERROR -- Insufficient balance - Please add balance in your Account',
-              );
-
-              throw new BadRequestException(
-                'Please add balance in your Account. Insufficient balance',
-              );
-            }
-
-            if (amount_tax > Number(balance.balance)) {
-              await trx.rollback();
-              this.logger.error(
-                ' amount_tax should be less than balance.balance. amount_tax is ->' +
-                  amount_tax +
-                  'balance.balance is ->' +
-                  balance.balance,
+                'Insufficient balance or balance update failed.',
               );
               throw new BadRequestException('Insufficient balance.');
             }
+            this.logger.log('balance ' + JSON.stringify(debitSuccess));
+            this.logger.log('amount_tax ' + amount_tax);
+            this.logger.log('balance.balance ' + debitSuccess.balance);
 
             const url = 'https://api.apexio.co.in/transaction/initiate';
             this.logger.log('Apexio-payout transfer request' + url);
@@ -334,7 +337,7 @@ export class PayoutService {
             //   },
             // };
             const response = await firstValueFrom(
-              this.httpService.post(url, payout_payment_details, { headers }),
+              this.httpService.post(url, payoutPaymentDetails, { headers }),
             );
 
             this.logger.log('response.data ' + JSON.stringify(response.data));
@@ -354,22 +357,6 @@ export class PayoutService {
               );
             }
 
-            const debitSuccess = await trx
-              .withSchema(process.env.DB_SCHEMA || 'public')
-              .table(tableNames.payout_balance)
-              .where({ merchant_id: liveMerchantapi.created_merchant })
-              .decrement('balance', amount_tax)
-              .returning('*')
-              .then((rows) => rows[0]);
-
-            this.logger.log('debitSuccess ' + JSON.stringify(debitSuccess));
-
-            if (!debitSuccess) {
-              await trx.rollback();
-              this.logger.log('Balance decrement failed');
-              throw new BadRequestException('Failed to debit balance');
-            }
-
             const updatedBalance: IPayoutBalance = await trx
               .withSchema(process.env.DB_SCHEMA || 'public')
               .table(tableNames.payout_balance)
@@ -379,16 +366,19 @@ export class PayoutService {
             this.logger.log('balance ' + JSON.stringify(updatedBalance));
 
             let statusDescription;
-            if (response.data['data']['status'] == 'SUCCESS') {
+            if (response.data['data']['status'].toLowerCase() == 'success') {
               statusDescription = 'Transaction Status Success';
-            } else if (response.data['data']['status'] == 'PENDING') {
+            } else if (
+              response.data['data']['status'].toLowerCase() == 'pending'
+            ) {
               statusDescription = 'Transaction Status Pending';
-            } else if (response.data['data']['status'] == 'FAILED') {
+            } else if (
+              response.data['data']['status'].toLowerCase() == 'failed'
+            ) {
               statusDescription = 'Transaction Status Failed';
             } else {
               statusDescription = 'Transaction Status Pending';
             }
-            const udf1_data = decrypted_string['udf1'] ?? '';
             await trx
               .withSchema(process.env.DB_SCHEMA || 'public')
               .insert({
@@ -419,7 +409,7 @@ export class PayoutService {
                 ben_bank_acc: decrypted_string.account_no,
                 amount: decrypted_string.amount,
                 transfer_mode: decrypted_string.transferMode,
-                status: response.data.data.status,
+                status: response.data.data.status.tolowercase(),
                 remarks: response.data.data.remark,
                 purpose: decrypted_string.purpose,
                 transfer_desc: statusDescription,
@@ -432,7 +422,7 @@ export class PayoutService {
                   .slice(0, 19)
                   .replace('T', ' '),
                 transfer_type: null,
-                udf1: udf1_data,
+                udf1: decrypted_string['udf1'] ?? '',
                 udf2: '',
                 udf3: '',
                 udf4: '',
@@ -441,7 +431,7 @@ export class PayoutService {
               .into(tableNames.payout_transactions);
 
             await trx.commit();
-            const respose_data = {
+            const resposeData = {
               statusCode: 200,
               date: dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss'),
               amount: decrypted_string['amount'],
@@ -450,20 +440,17 @@ export class PayoutService {
               desc: statusDescription,
               bankId: response.data['data']['bank_reference_no'],
             };
-            const key = liveMerchantapi.api_secret;
             this.logger.log(
               'JSON.stringify(response.data) ' + JSON.stringify(response.data),
             );
-            const encrypted_string = await this.encryptAES128ECB(
-              JSON.stringify(response.data),
-              key,
+            encryptedString = await this.encryptAES128ECB(
+              JSON.stringify(resposeData),
+              apiSecret,
             );
             this.logger.log(
               'Apexio-payout transfer final response ' +
-                JSON.stringify(encrypted_string),
+                JSON.stringify(encryptedString),
             );
-
-            return encrypted_string;
           } catch (err) {
             await trx.rollback();
             throw err;
@@ -483,6 +470,7 @@ export class PayoutService {
         });
       }
     }
+    return encryptedString;
   }
 
   async decryptAES128ECB(
@@ -515,5 +503,156 @@ export class PayoutService {
     ]);
 
     return encrypted.toString('base64');
+  }
+
+  async payoutCheckStatus(payoutDto: PayoutDto, req: Request): Promise<string> {
+    this.logger.log('----- PAYOUT STATUS CHECK -----');
+    this.logger.log('Request IP Address ' + req.ip);
+    this.logger.log('Request Data clientId ' + payoutDto.clientId);
+    this.logger.log('Request encrypt data ' + payoutDto.encrypt);
+
+    const liveMerchantapi: ILiveMerchantApi = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.live_merchantapi)
+      .where({
+        api_key: payoutDto.clientId,
+      })
+      .first();
+    this.logger.log('liveMerchantapi ' + JSON.stringify(liveMerchantapi));
+
+    let errorResponse = {};
+    if (!liveMerchantapi) {
+      errorResponse = {
+        Description: 'Your clientId is invalid',
+        clientId: payoutDto.clientId,
+        encrypt: payoutDto.encrypt,
+      };
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      throw new BadRequestException('Your clientId is invalid');
+    }
+
+    const ipAddress: IMerchantPayoutIpwhitelist = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.merchant_payout_ipwhitelist)
+      .where({
+        merchant_id: liveMerchantapi.created_merchant,
+        ipwhitelist: req.ip,
+      })
+      .first();
+
+    // if (!ipAddress) {
+    //   errorResponse = {
+    //     Description: 'Ip Address is not whitelisted',
+    //     clientId: payoutDto.clientId,
+    //     encrypt: payoutDto.encrypt,
+    //   };
+    //   this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+    //   throw new BadRequestException('Ip Address is not whitelisted');
+    // }
+    const apiSecret = liveMerchantapi.api_secret;
+    let decryptedString;
+
+    try {
+      decryptedString = JSON.parse(
+        JSON.parse(await this.decryptAES128ECB(payoutDto.encrypt, apiSecret)),
+      );
+      if (!decryptedString) {
+        throw new BadRequestException('Invalid Encrypted ');
+      }
+    } catch (error) {
+      errorResponse = {
+        message: error,
+        clientId: payoutDto.clientId,
+        encrypt: payoutDto.encrypt,
+      };
+      this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+      throw new BadRequestException('Invalid Encrypted Data');
+    }
+    this.logger.log('decryptedData ' + JSON.stringify(decryptedString));
+    const dtoObject = plainToInstance(StatusCheckDetailsDto, decryptedString);
+    const errors = await validate(dtoObject);
+
+    if (errors.length > 0) {
+      const validationErrors = errors.reduce((acc, err) => {
+        acc[err.property] = Object.values(err.constraints || {});
+        return acc;
+      }, {});
+      throw new BadRequestException(...Object.values(validationErrors));
+    }
+
+    if (payoutDto.clientId != decryptedString?.clientId) {
+      throw new BadRequestException('Your encrypt clientId is invalid');
+    }
+    if (apiSecret != decryptedString?.clientSecret) {
+      throw new BadRequestException('Your encrypt clientSecret is invalid');
+    }
+
+    const merchantPayoutVendor = await this._knex
+      .withSchema(process.env.DB_SCHEMA || 'public')
+      .table(tableNames.merchant_payout_vendor)
+      .where({
+        merchant_id: liveMerchantapi.created_merchant,
+      })
+      .first();
+
+    if (!merchantPayoutVendor) {
+      throw new BadRequestException("The vendor's bank is not assigned");
+    }
+
+    let transactionDetails;
+    let encryptedString: string = '';
+    if (merchantPayoutVendor.imps == '1') {
+      if (decryptedString?.udf1) {
+        transactionDetails = await this._knex
+          .withSchema(process.env.DB_SCHEMA || 'public')
+          .table(tableNames.payout_transactions)
+          .where({ udf1: decryptedString?.udf1 })
+          .first();
+
+        if (!transactionDetails) {
+          errorResponse = {
+            message: 'invalid udf1',
+            clientId: payoutDto.clientId,
+            encrypt: payoutDto.encrypt,
+          };
+          this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+          throw new BadRequestException('invalid udf1');
+        }
+      } else if (decryptedString.orderID) {
+        transactionDetails = await this._knex
+          .withSchema(process.env.DB_SCHEMA || 'public')
+          .table(tableNames.payout_transactions)
+          .where({ transfer_id: decryptedString.orderID })
+          .first();
+
+        if (!transactionDetails) {
+          errorResponse = {
+            message: 'invalid orderID',
+            clientId: payoutDto.clientId,
+            encrypt: payoutDto.encrypt,
+          };
+          this.logger.error('--ERROR-- ' + JSON.stringify(errorResponse));
+          throw new BadRequestException('invalid orderID');
+        }
+      }
+
+      const resposeData = {
+        statusCode: 200,
+        bankId: transactionDetails?.utr,
+        orderId: transactionDetails?.transfer_id,
+        status: transactionDetails?.status,
+        desc: transactionDetails?.transfer_desc,
+        udf1: transactionDetails?.udf1,
+      };
+      this.logger.log('resposeData ' + JSON.stringify(resposeData));
+
+      encryptedString = await this.encryptAES128ECB(
+        JSON.stringify(resposeData),
+        apiSecret,
+      );
+
+      this.logger.log('Status check final Response ' + encryptedString);
+    }
+    return encryptedString;
   }
 }

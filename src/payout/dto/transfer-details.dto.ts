@@ -1,4 +1,3 @@
-// transfer-details.dto.ts
 import { IsString, IsNotEmpty, Matches, ValidateIf } from 'class-validator';
 
 export class TransferDetailsDto {

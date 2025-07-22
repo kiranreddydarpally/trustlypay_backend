@@ -23,7 +23,7 @@ export class ValidationExceptionFilter implements ExceptionFilter {
         ? exceptionResponse
         : (exceptionResponse as any).message;
     this.logger.error(
-      'error  ' +
+      'exception error  ' +
         JSON.stringify({
           statusCode: status,
           timestamp: new Date().toISOString(),
