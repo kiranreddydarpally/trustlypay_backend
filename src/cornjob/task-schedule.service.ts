@@ -93,7 +93,7 @@ export class TaskScheduleService {
         this.logger.log('Getting error in payout status check');
         continue;
       }
-      if (payoutStatusResponse?.data?.['meta']?.['message'] == 'FAILED') {
+      if (payoutStatusResponse?.data?.['meta']?.['message'] === 'FAILED') {
         this.logger.log(
           'payoutstatusa api response error ' +
             payoutStatusResponse?.data?.['meta']?.['message'],
@@ -103,18 +103,19 @@ export class TaskScheduleService {
       let statusDescription = '';
       let status = '';
       if (
-        payoutStatusResponse?.data['payOutStatusData']['status'] == 'SUCCESS'
+        payoutStatusResponse?.data['payOutStatusData']?.['status'] === 'SUCCESS'
       ) {
         statusDescription = 'Transaction Status Success';
         status = 'SUCCESS';
       } else if (
-        payoutStatusResponse?.data['payOutStatusData']['status'] == 'PENDING'
+        payoutStatusResponse?.data['payOutStatusData']?.['status'] === 'PENDING'
       ) {
         statusDescription = 'Transaction Status Pending';
         status = 'PENDING';
       } else if (
-        payoutStatusResponse?.data['payOutStatusData']['status'] == 'FAILURE' ||
-        'FAILED'
+        ['FAILURE', 'FAILED'].includes(
+          payoutStatusResponse?.data['payOutStatusData']?.['status'],
+        )
       ) {
         statusDescription = 'Transaction Status Failed';
         status = 'FAILED';
@@ -195,7 +196,7 @@ export class TaskScheduleService {
           transfer_id:
             payoutStatusResponse?.data?.['payOutStatusData']?.[
               'merchantRefereenceId'
-            ],
+            ] ?? '',
         })
         .first();
 

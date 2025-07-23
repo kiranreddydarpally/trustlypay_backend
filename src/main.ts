@@ -5,6 +5,7 @@ import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './winston-logger.config';
 import { ValidationPipe } from '@nestjs/common';
 import { ValidationExceptionFilter } from './filters/validation-exception.filter';
+import cors from 'cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -34,6 +35,7 @@ async function bootstrap() {
       transform: true,
     }),
   );
+  app.use(cors());
   app.useGlobalFilters(new ValidationExceptionFilter());
   const document = SwaggerModule.createDocument(app, config);
 
