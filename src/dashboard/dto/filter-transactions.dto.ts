@@ -1,4 +1,3 @@
-// dto/filter-transactions.dto.ts
 import { IsDateString, IsOptional, IsNumber } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
