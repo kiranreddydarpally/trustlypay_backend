@@ -12,8 +12,16 @@ export class PayoutController {
   directPayoutTransfer(
     @Body() payoutDto: PayoutDto,
     @Req() req: ExpressRequest,
-  ): Promise<any> {
+  ): Promise<string> {
     return this.payoutService.directPayoutTransfer(payoutDto, req);
+  }
+
+  @Post('payoutCheckStatus')
+  payoutCheckStatus(
+    @Body() payoutDto: PayoutDto,
+    @Req() req: ExpressRequest,
+  ): Promise<string> {
+    return this.payoutService.payoutCheckStatus(payoutDto, req);
   }
 
   @Post('Payout-encrypt-AES128ECB/:key')
@@ -29,5 +37,13 @@ export class PayoutController {
       JSON.stringify(payoutEncryptAES128ECB),
       key,
     );
+  }
+
+  @Post('balanceCheck')
+  payoutBalanceCheck(
+    @Body() payoutDto: PayoutDto,
+    @Req() req: ExpressRequest,
+  ): Promise<string> {
+    return this.payoutService.payoutBalanceCheck(payoutDto, req);
   }
 }
