@@ -9,6 +9,7 @@ import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './winston-logger.config';
 import { PayinModule } from './payin/payin.module';
 import { TasksModule } from './cornjob/tasks.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { PayoutModule } from './payout/payout.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { PayoutModule } from './payout/payout.module';
     WinstonModule.forRoot(winstonConfig),
     PayinModule,
     TasksModule,
+    DashboardModule,
     PayoutModule,
   ],
   controllers: [AppController],
