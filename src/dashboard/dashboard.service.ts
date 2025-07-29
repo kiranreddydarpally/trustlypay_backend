@@ -123,9 +123,11 @@ export class DashboardService {
       )
       .select(
         'merchant.merchant_gid',
+        'merchant.merchant_status',
         'merchant.name',
         'vendor_bank.bank_name',
       );
+
     return result;
   }
 }
