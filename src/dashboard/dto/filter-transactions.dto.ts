@@ -17,7 +17,7 @@ export class FilterTransactionsDto {
   toDate: string;
 
   @ApiPropertyOptional({
-    description: 'Merchant id  should be number',
+    description: 'Merchant id should be number',
   })
   @IsOptional()
   merchantId?: number;
