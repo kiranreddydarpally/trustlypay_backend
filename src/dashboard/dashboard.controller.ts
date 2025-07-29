@@ -7,8 +7,18 @@ import { ApiQuery, ApiTags } from '@nestjs/swagger';
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
-  @Get('summary')
-  async getSummary(@Query() query: FilterTransactionsDto) {
-    return await this.dashboardService.getTransactionSummary(query);
+  @Get('payin-summary')
+  async getPayinTransactionSummary(@Query() query: FilterTransactionsDto) {
+    return await this.dashboardService.getPayinTransactionSummary(query);
+  }
+
+  @Get('payout-summary')
+  async getPayoutTransactionSummary(@Query() query: FilterTransactionsDto) {
+    return await this.dashboardService.getPayoutTransactionSummary(query);
+  }
+
+  @Get('merchant-routing-details')
+  async getMerchantRoutingDetails() {
+    return await this.dashboardService.getMerchantRoutingDetails();
   }
 }

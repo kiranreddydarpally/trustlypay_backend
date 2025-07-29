@@ -4,20 +4,21 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class FilterTransactionsDto {
   @ApiProperty({
     example: '2025-07-01',
-    description: 'Start date (YYYY-MM-DD)',
+    description: 'Start date should be (YYYY-MM-DD) format',
   })
   @IsDateString()
   fromDate: string;
 
-  @ApiProperty({ example: '2025-07-17', description: 'End date (YYYY-MM-DD)' })
+  @ApiProperty({
+    example: '2025-07-17',
+    description: 'End date should be (YYYY-MM-DD) format',
+  })
   @IsDateString()
   toDate: string;
 
   @ApiPropertyOptional({
-    example: '1',
-    description: 'Merchant id or ""',
+    description: 'Merchant id  should be number',
   })
   @IsOptional()
-  @IsNumber()
   merchantId?: number;
 }
