@@ -1,6 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { DashboardPayinService } from './dashboard-payin-service';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PayinDetailedTxnsFilterDto } from './dto/Payin-Detailed-Txns-Filter-dto';
 
 @Controller('dashboard-payin')

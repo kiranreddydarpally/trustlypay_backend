@@ -1,19 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { Knex } from 'src/knex/knex.interface';
-import { FilterTransactionsDto } from './dto/Over-View-Filter-dto';
+import { OverViewFilterDto } from './dto/Over-View-Filter-dto';
 import { tableNames } from 'src/enums/table-names.enum';
+import dayjs from 'dayjs';
 
 @Injectable()
 export class DashboardService {
   constructor(@Inject(KNEX_CONNECTION) private readonly knex: Knex) {}
 
-  async getPayinTransactionSummary(filter: FilterTransactionsDto) {
+  async getPayinTransactionSummary(filter: OverViewFilterDto) {
     const { fromDate, toDate, merchantId } = filter;
-
-    const start = new Date(fromDate + 'T00:00:00');
-    const end = new Date(toDate + 'T23:59:59');
-
+    const start = dayjs(fromDate)
+      .tz('Asia/Kolkata')
+      .format('YYYY-MM-DD HH:mm:ss');
+    const end = dayjs(toDate).tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss');
     const query = this.knex(tableNames.live_payment)
       .select('transaction_status')
       .sum('transaction_amount as amount')
@@ -59,11 +60,11 @@ export class DashboardService {
     return [failed, success, pending, all];
   }
 
-  async getPayoutTransactionSummary(filter: FilterTransactionsDto) {
-    const { fromDate, toDate, merchantId } = filter;
+  async getPayoutTransactionSummary(overViewFilterDto: OverViewFilterDto) {
+    const { fromDate, toDate, merchantId } = overViewFilterDto;
 
-    const start = new Date(fromDate + 'T00:00:00');
-    const end = new Date(toDate + 'T23:59:59');
+    const start = new Date(fromDate);
+    const end = new Date(toDate);
 
     const query = this.knex(tableNames.payout_transactions)
       .select('status')

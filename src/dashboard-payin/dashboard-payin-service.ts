@@ -3,28 +3,31 @@ import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { Knex } from 'src/knex/knex.interface';
 import { tableNames } from 'src/enums/table-names.enum';
 import { PayinDetailedTxnsFilterDto } from './dto/Payin-Detailed-Txns-Filter-dto';
+import dayjs from 'dayjs';
 
 @Injectable()
 export class DashboardPayinService {
   constructor(@Inject(KNEX_CONNECTION) private readonly knex: Knex) {}
-  async getPayinDetailedTransactionSummary(filter: PayinDetailedTxnsFilterDto) {
+  async getPayinDetailedTransactionSummary(
+    payinDetailedTxnsFilterDto: PayinDetailedTxnsFilterDto,
+  ) {
     const {
       fromDate,
       toDate,
-      pageNumber,
-      pageSize,
+      pageNumber = 1,
+      pageSize = 10,
       transactionId,
       utr,
       udf1,
       transactionStatus,
       merchantId,
-    } = filter;
+    } = payinDetailedTxnsFilterDto;
 
-    const start = new Date(fromDate + 'T00:00:00');
-    const end = new Date(toDate + 'T23:59:59');
-    const page = pageNumber || 1;
-    const limit = pageSize || 10;
-    const skip = (page - 1) * limit;
+    const start = dayjs(fromDate)
+      .tz('Asia/Kolkata')
+      .format('YYYY-MM-DD HH:mm:ss');
+    const end = dayjs(toDate).tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss');
+    const skip = (pageNumber - 1) * pageSize;
 
     const query = this.knex(tableNames.live_payment)
       .select(
@@ -42,19 +45,15 @@ export class DashboardPayinService {
       .whereBetween('live_payment.created_date', [start, end]);
 
     if (transactionId) {
-      query.andWhere(
-        'live_payment.transaction_gid',
-        'ilike',
-        `%${transactionId}%`,
-      );
+      query.andWhereILike('live_payment.transaction_gid', `%${transactionId}%`);
     }
 
     if (utr) {
-      query.andWhere('live_payment.bank_ref_no', 'ilike', `%${utr}%`);
+      query.andWhereILike('live_payment.bank_ref_no', `%${utr}%`);
     }
 
     if (udf1) {
-      query.andWhere('live_payment.udf1', 'ilike', `%${udf1}%`);
+      query.andWhereILike('live_payment.udf1', `%${udf1}%`);
     }
 
     if (transactionStatus) {
@@ -65,7 +64,7 @@ export class DashboardPayinService {
       query.andWhere('live_payment.created_merchant', merchantId);
     }
 
-    query.limit(limit).offset(skip);
+    query.limit(pageSize).offset(skip);
 
     console.log(query.toString());
     return await query;

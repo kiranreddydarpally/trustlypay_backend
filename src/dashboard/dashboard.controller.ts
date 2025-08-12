@@ -1,19 +1,18 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { FilterTransactionsDto } from './dto/Over-View-Filter-dto';
+import { OverViewFilterDto } from './dto/Over-View-Filter-dto';
 import { DashboardService } from './dashboard.service';
-import { ApiQuery, ApiTags } from '@nestjs/swagger';
 
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('payin-summary')
-  async getPayinTransactionSummary(@Query() query: FilterTransactionsDto) {
+  async getPayinTransactionSummary(@Query() query: OverViewFilterDto) {
     return await this.dashboardService.getPayinTransactionSummary(query);
   }
 
   @Get('payout-summary')
-  async getPayoutTransactionSummary(@Query() query: FilterTransactionsDto) {
+  async getPayoutTransactionSummary(@Query() query: OverViewFilterDto) {
     return await this.dashboardService.getPayoutTransactionSummary(query);
   }
 

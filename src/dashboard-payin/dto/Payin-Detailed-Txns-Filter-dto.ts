@@ -1,21 +1,23 @@
-import { IsDateString, IsOptional, IsNumber } from 'class-validator';
+import { IsDateString, IsOptional, IsNumber, IsDefined, IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { StatusNames } from 'src/enums/status.enum';
+import { StatusNames } from 'src/enums/status-names.enum';
 
 export class PayinDetailedTxnsFilterDto {
   @ApiProperty({
-    example: '2025-07-01',
-    description: 'Start date should be (YYYY-MM-DD) format',
+    example: '2025-07-01 00:00:00',
+    description: 'Start date should be (YYYY-MM-DD HH:MM:SS) format',
   })
   @IsDateString()
+  @IsNotEmpty()
   fromDate: string;
 
   @ApiProperty({
-    example: '2025-07-31',
-    description: 'End date should be (YYYY-MM-DD) format',
+    example: '2025-07-31 23:59:59',
+    description: 'End date should be (YYYY-MM-DD HH:MM:SS) format',
   })
   @IsDateString()
+  @IsNotEmpty()
   toDate: string;
 
   @ApiProperty({
@@ -24,6 +26,7 @@ export class PayinDetailedTxnsFilterDto {
   })
   @IsNumber()
   @Type(() => Number)
+  @IsNotEmpty()
   pageNumber: number;
 
   @ApiProperty({
@@ -32,6 +35,7 @@ export class PayinDetailedTxnsFilterDto {
   })
   @IsNumber()
   @Type(() => Number)
+  @IsNotEmpty()
   pageSize: number;
 
   @ApiPropertyOptional({
