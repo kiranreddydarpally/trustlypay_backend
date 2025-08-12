@@ -1,5 +1,6 @@
 import { IsDateString, IsOptional, IsNumber } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class FilterTransactionsDto {
   @ApiProperty({
@@ -20,5 +21,7 @@ export class FilterTransactionsDto {
     description: 'Merchant id should be number',
   })
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
   merchantId?: number;
 }

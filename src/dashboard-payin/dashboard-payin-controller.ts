@@ -1,6 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { DashboardPayinService } from './dashboard-payin-service';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { PayinDetailedTxnsFilterDto } from './dto/Payin-Detailed-Txns-Filter-dto';
 
 @Controller('dashboard-payin')
 export class DashboardPayinController {
@@ -9,5 +10,14 @@ export class DashboardPayinController {
   @Get('dashboard-payin-summary')
   async getPayinMerchantsTxnSummary() {
     return await this.dashboardPayinService.getPayinMerchantsTxnSummary();
+  }
+
+  @Get('detailed-txn-summary')
+  async getPayinDetailedTransactionSummary(
+    @Query() query: PayinDetailedTxnsFilterDto,
+  ) {
+    return await this.dashboardPayinService.getPayinDetailedTransactionSummary(
+      query
+    );
   }
 }

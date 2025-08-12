@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { Knex } from 'src/knex/knex.interface';
-import { FilterTransactionsDto } from './dto/filter-transactions.dto';
+import { FilterTransactionsDto } from './dto/Over-View-Filter-dto';
 import { tableNames } from 'src/enums/table-names.enum';
 
 @Injectable()

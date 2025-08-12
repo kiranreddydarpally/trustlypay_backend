@@ -12,6 +12,7 @@ import { TasksModule } from './cornjob/tasks.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PayoutModule } from './payout/payout.module';
 import { DashboardPayinModule } from './dashboard-payin/dashboard-payin-module';
+import { DashboardPayoutModule } from './dashboard-payout/dashboard-payout-module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { DashboardPayinModule } from './dashboard-payin/dashboard-payin-module';
     DashboardModule,
     PayoutModule,
     DashboardPayinModule,
+    DashboardPayoutModule,
   ],
   controllers: [AppController],
   providers: [AppService],
