@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
-import { OverViewFilterDto } from './dto/Over-View-Filter.dto';
+import { OverViewFilterDto } from './dto/over-view-filter.dto';
 
 @Controller('dashboard')
 export class DashboardController {
