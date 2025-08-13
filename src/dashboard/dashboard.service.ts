@@ -3,7 +3,7 @@ import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { Knex } from 'src/knex/knex.interface';
 import { tableNames } from 'src/enums/table-names.enum';
 import dayjs from 'dayjs';
-import { OverViewFilterDto } from './dto/over-view-filter.dto.ts';
+import { OverViewFilterDto } from './dto/Over-View-Filter.dto';
 
 @Injectable()
 export class DashboardService {
