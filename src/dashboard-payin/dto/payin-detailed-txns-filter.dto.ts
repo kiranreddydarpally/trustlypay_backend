@@ -1,4 +1,10 @@
-import { IsDateString, IsOptional, IsNumber, IsDefined, IsNotEmpty } from 'class-validator';
+import {
+  IsDateString,
+  IsOptional,
+  IsNumber,
+  IsDefined,
+  IsNotEmpty,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { StatusNames } from 'src/enums/status-names.enum';
@@ -48,6 +54,8 @@ export class PayinDetailedTxnsFilterDto {
     description: 'UTR must be a number',
   })
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
   utr?: number;
 
   @ApiPropertyOptional({

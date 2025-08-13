@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { DashboardPayinService } from './dashboard-payin-service';
-import { PayinDetailedTxnsFilterDto } from './dto/Payin-Detailed-Txns-Filter-dto';
+import { PayinDetailedTxnsFilterDto } from './dto/payin-detailed-txns-filter.dto';
 
 @Controller('dashboard-payin')
 export class DashboardPayinController {
@@ -16,7 +16,7 @@ export class DashboardPayinController {
     @Query() query: PayinDetailedTxnsFilterDto,
   ) {
     return await this.dashboardPayinService.getPayinDetailedTransactionSummary(
-      query
+      query,
     );
   }
 }

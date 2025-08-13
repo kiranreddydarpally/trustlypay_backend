@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { Knex } from 'src/knex/knex.interface';
-import { OverViewFilterDto } from './dto/Over-View-Filter-dto';
 import { tableNames } from 'src/enums/table-names.enum';
 import dayjs from 'dayjs';
+import { OverViewFilterDto } from './dto/over-view-filter.dto.ts';
 
 @Injectable()
 export class DashboardService {
@@ -63,8 +63,10 @@ export class DashboardService {
   async getPayoutTransactionSummary(overViewFilterDto: OverViewFilterDto) {
     const { fromDate, toDate, merchantId } = overViewFilterDto;
 
-    const start = new Date(fromDate);
-    const end = new Date(toDate);
+    const start = dayjs(fromDate)
+      .tz('Asia/Kolkata')
+      .format('YYYY-MM-DD HH:mm:ss');
+    const end = dayjs(toDate).tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss');
 
     const query = this.knex(tableNames.payout_transactions)
       .select('status')

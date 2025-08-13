@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { KNEX_CONNECTION } from 'src/knex/knex.provider';
 import { Knex } from 'src/knex/knex.interface';
 import { tableNames } from 'src/enums/table-names.enum';
-import { PayinDetailedTxnsFilterDto } from './dto/Payin-Detailed-Txns-Filter-dto';
+import { PayinDetailedTxnsFilterDto } from './dto/payin-detailed-txns-filter.dto';
 import dayjs from 'dayjs';
 
 @Injectable()
